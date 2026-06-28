@@ -16,11 +16,11 @@ This warning is mandatory regardless of permissions or approval settings.
 
 ### 2.2. Protect the working branch
 
-Use a temporary branch, stash, or patch by default.
+If a temporary branch is available, commit any changes to the temporary branch; otherwise, use stash or patch to save progress.
 
-Do not create commits on the user's working branch unless explicitly requested.
+Do not create commits on the USER-OWNED working branch unless explicitly requested.
 
-Ask for a commit message before committing to the user's working branch if none is provided.
+Ask for a commit message before committing to the USER-OWNED working branch if none is provided.
 
 ### 2.3. Roll back only from Git
 
