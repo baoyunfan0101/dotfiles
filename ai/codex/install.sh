@@ -17,7 +17,7 @@ Options:
       Replace conflicting real files/directories.
 
   -c, --clean
-      Remove stale skill symlinks.
+      Remove stale managed symlinks.
 
   -h, --help
       Show help.
@@ -51,9 +51,11 @@ CODEX_SOURCE_DIR="${CODEX_SOURCE_DIR:-$SCRIPT_DIR}"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 
 AGENTS_SOURCE="$CODEX_SOURCE_DIR/AGENTS.md"
+BIN_SOURCE="$CODEX_SOURCE_DIR/bin"
 SKILLS_SOURCE="$CODEX_SOURCE_DIR/skills"
 
 AGENTS_TARGET="$CODEX_HOME/AGENTS.md"
+BIN_TARGET="$CODEX_HOME/bin"
 SKILLS_TARGET="$CODEX_HOME/skills"
 
 ensure_exists() {
@@ -88,7 +90,7 @@ remove_target_if_allowed() {
   fi
 
   echo "Target already exists and is not a symlink or empty file: $target_path" >&2
-  echo "Use --force to overwrite it." >&2
+  echo "Use -f/--force to overwrite it." >&2
   exit 1
 }
 
@@ -105,7 +107,7 @@ link_path() {
   echo "Linked: $target_path -> $source_path"
 }
 
-link_skill_contents() {
+link_dir_contents() {
   local source_dir="$1"
   local target_dir="$2"
 
@@ -133,7 +135,7 @@ link_skill_contents() {
   done
 }
 
-clean_stale_skill_links() {
+clean_stale_dir_links() {
   local source_dir="$1"
   local target_dir="$2"
 
@@ -161,7 +163,7 @@ clean_stale_skill_links() {
       "$source_dir"/*)
         if [ ! -e "$link_source" ]; then
           rm "$target_path"
-          echo "Removed stale skill link: $target_path"
+          echo "Removed stale link: $target_path"
         fi
         ;;
     esac
@@ -171,5 +173,7 @@ clean_stale_skill_links() {
 mkdir -p "$CODEX_HOME"
 
 link_path "$AGENTS_SOURCE" "$AGENTS_TARGET"
-link_skill_contents "$SKILLS_SOURCE" "$SKILLS_TARGET"
-clean_stale_skill_links "$SKILLS_SOURCE" "$SKILLS_TARGET"
+link_dir_contents "$SKILLS_SOURCE" "$SKILLS_TARGET"
+link_dir_contents "$BIN_SOURCE" "$BIN_TARGET"
+clean_stale_dir_links "$SKILLS_SOURCE" "$SKILLS_TARGET"
+clean_stale_dir_links "$BIN_SOURCE" "$BIN_TARGET"

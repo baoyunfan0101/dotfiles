@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Create a repo-local safety snapshot before Codex writes project files.
+# Initialize Git if needed, ignore .codex-safety/, and save dirty state.
+
+safety_dir_name=".codex-safety"
+ignore_line=".codex-safety/"
+
+# Initialize Git when needed.
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git init >/dev/null
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+# Ignore the safety directory.
+if [ ! -f .gitignore ]; then
+  printf "%s\n" "$ignore_line" > .gitignore
+elif ! grep -qxF "$ignore_line" .gitignore; then
+  tmp_gitignore="$(mktemp)"
+  {
+    printf "%s\n" "$ignore_line"
+    cat .gitignore
+  } > "$tmp_gitignore"
+  mv "$tmp_gitignore" .gitignore
+fi
+
+# Read project status.
+status_output="$(git status --short -- . ":(exclude)$safety_dir_name/**")"
+
+# Exit when there is nothing to snapshot.
+if [ -z "$status_output" ]; then
+  echo "state=clean"
+  echo "repo=$repo_root"
+  exit 0
+fi
+
+# Read Codex IDs.
+# CODEX_THREAD_ID: usually provided by Codex; defaults to unknown-thread.
+# CODEX_TURN_ID: pass when available; defaults to timestamped unknown-turn.
+thread_id="${CODEX_THREAD_ID:-unknown-thread}"
+turn_id="${CODEX_TURN_ID:-unknown-turn}"
+
+# Keep IDs filesystem-safe.
+safe_thread_id="$(printf "%s" "$thread_id" | tr -c 'A-Za-z0-9._-' '_')"
+safe_turn_id="$(printf "%s" "$turn_id" | tr -c 'A-Za-z0-9._-' '_')"
+
+# Build the snapshot path.
+created_at_utc="$(date -u +%Y%m%dT%H%M%SZ)"
+
+if [ "$turn_id" = "unknown-turn" ]; then
+  snapshot_id="unknown-turn-$created_at_utc"
+else
+  snapshot_id="$safe_turn_id"
+fi
+
+snapshot_dir="$safety_dir_name/$safe_thread_id/$snapshot_id"
+
+# Skip duplicate snapshots for the same turn.
+if [ -d "$snapshot_dir" ]; then
+  echo "state=already-snapshotted"
+  echo "repo=$repo_root"
+  echo "snapshot_dir=$snapshot_dir"
+  exit 0
+fi
+
+mkdir -p "$snapshot_dir"
+
+# Save snapshot metadata.
+cat > "$snapshot_dir/meta.txt" <<EOF
+repo=$repo_root
+thread_id=$thread_id
+turn_id=$turn_id
+created_at_utc=$created_at_utc
+snapshot_dir=$snapshot_dir
+EOF
+
+# Save Git context.
+printf "%s\n" "$status_output" > "$snapshot_dir/status.txt"
+git rev-parse HEAD > "$snapshot_dir/head.txt" 2>/dev/null || true
+git branch --show-current > "$snapshot_dir/branch.txt" 2>/dev/null || true
+
+# Save unstaged changes.
+git diff --binary -- . ":(exclude)$safety_dir_name/**" > "$snapshot_dir/worktree.patch"
+
+# Save staged changes.
+git diff --binary --cached -- . ":(exclude)$safety_dir_name/**" > "$snapshot_dir/index.patch"
+
+# Save untracked files.
+git ls-files --others --exclude-standard -z -- . ":(exclude)$safety_dir_name/**" > "$snapshot_dir/untracked.files.z"
+
+if [ -s "$snapshot_dir/untracked.files.z" ]; then
+  tar --null -T "$snapshot_dir/untracked.files.z" -cf "$snapshot_dir/untracked.tar"
+fi
+
+# Print snapshot paths.
+echo "state=dirty"
+echo "repo=$repo_root"
+echo "snapshot_dir=$snapshot_dir"
+echo "status=$snapshot_dir/status.txt"
+echo "worktree_patch=$snapshot_dir/worktree.patch"
+echo "index_patch=$snapshot_dir/index.patch"
+echo "untracked_list=$snapshot_dir/untracked.files.z"
+
+if [ -f "$snapshot_dir/untracked.tar" ]; then
+  echo "untracked_archive=$snapshot_dir/untracked.tar"
+fi
