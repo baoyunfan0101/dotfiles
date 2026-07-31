@@ -2,7 +2,7 @@
 
 ## Pre-write gate
 
-- Before the first project write in each Codex turn, run the pre-write gate once.
+- Before the first project write in each Codex turn, run the pre-write gate once to ensure Git, snapshot dirty worktrees, and print `repo=<repo-root>`.
 
   Command:
 
