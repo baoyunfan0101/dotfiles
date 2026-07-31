@@ -7,7 +7,7 @@
   Command:
 
   ```bash
-  CODEX_TURN_ID="<x-codex-turn-metadata.turn_id>" ~/.codex/bin/pre-write-gate
+  CODEX_TURN_ID="<current-turn-id>" ~/.codex/bin/pre-write-gate
   ```
 
 - Handle pre-write gate results.
@@ -15,6 +15,26 @@
   - `state=dirty`: report `[pre-write-gate] INFO snapshot: snapshot_dir=<snapshot-dir>`, then continue.
   - `state=already-snapshotted`: continue.
   - Failure: report `[pre-write-gate] ERROR abort: output="<command-output>"`, and do not write project files.
+
+## Authoring rules
+
+### Logs
+
+- Emit each workflow event log immediately when the event happens.
+
+- Repeat all workflow event logs only at the start of the final summary as a Markdown blockquote.
+
+### Responses
+
+- Match the language of the user's latest message unless explicitly requested otherwise.
+
+- When showing Markdown that contains fenced code blocks, wrap the outer block with `~~~md`.
+
+### Project files
+
+- Use only ASCII characters unless explicitly requested otherwise.
+
+- Preserve existing comments for code or sections that remain present unless explicitly requested otherwise.
 
 ## Branch workflow
 
@@ -122,15 +142,3 @@
   [commit] INFO push: remote=<remote-name> branch=<branch-name>
   [commit] ERROR push: output="<command-output>"
   ```
-
-## Character set
-
-Use ASCII characters only in all project-related content unless the user explicitly requests otherwise.
-
-## Git safety
-
-Without Git history, do not perform rollback or attempt to recover a previous file state based on model inference.
-
-## Comments
-
-Do not modify existing comments as long as the commented code or commented section remains present unless the user explicitly requests it.
