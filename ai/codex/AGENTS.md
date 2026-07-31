@@ -2,19 +2,19 @@
 
 ## Pre-write gate
 
-Before the first project write in each Codex turn, run:
+- Before the first project write in each Codex turn, run the pre-write gate once.
 
-```bash
-CODEX_TURN_ID="<x-codex-turn-metadata.turn_id>" ~/.codex/bin/pre-write-gate
-```
+  Command:
 
-Run it only once per turn.
+  ```bash
+  CODEX_TURN_ID="<x-codex-turn-metadata.turn_id>" ~/.codex/bin/pre-write-gate
+  ```
 
-If it returns `state=dirty`, report `snapshot_dir` before writing.
-
-If it returns `state=already-snapshotted`, continue.
-
-If it fails, do not write project files.
+- Handle pre-write gate results.
+  - `state=clean`: continue.
+  - `state=dirty`: report `[pre-write-gate] INFO snapshot: snapshot_dir=<snapshot-dir>`, then continue.
+  - `state=already-snapshotted`: continue.
+  - Failure: report `[pre-write-gate] ERROR abort: output="<command-output>"`, and do not write project files.
 
 ## Branch workflow
 
