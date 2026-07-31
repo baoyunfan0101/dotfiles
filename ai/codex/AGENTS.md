@@ -79,6 +79,7 @@
   [branch] INFO continue: name=<branch-name>
   [branch] INFO finish: name=<branch-name> target=<target-branch> method=<merge-method>
   [branch] INFO pr: title=<pr-title> url=<pr-url> method=squash
+  [branch] INFO delete: name=<branch-name> location=<local|remote|local-and-remote>
   ```
 
 ## Character set
