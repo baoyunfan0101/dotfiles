@@ -16,21 +16,76 @@ If it returns `state=already-snapshotted`, continue.
 
 If it fails, do not write project files.
 
+## Branch workflow
+
+### Lifecycle
+
+- Start each new task from a short-lived branch based on the latest `main`; if already on a non-`main` branch, continue on the current branch.
+
+- Keep each branch scoped to one task, and finish it only when explicitly asked to finish the current task or start a new task.
+
+- When finishing the current branch, merge it back into `main`.
+  - Personal work: run `git switch main`, `git pull --ff-only`, and `git merge --no-ff <branch-name>`.
+  - Team work: create a PR and squash merge it. Follow the repository's existing PR title and description style when available; otherwise, use the default PR format below.
+
+    Title:
+
+    ```text
+    <type>: <concise-summary>
+    ```
+
+    Description:
+
+    ```md
+    ## Summary
+
+    - <summary-item>
+
+    ## Verification
+
+    - <verification-item>
+    ```
+
+- Delete branches only when explicitly requested.
+
+### Naming
+
+- Follow the repository's existing branch naming style when available; otherwise, use the default branch format below.
+
+  Format:
+
+  ```text
+  <type>/<area>-<short-kebab-description>
+  ```
+
+  Type prefixes:
+
+  ```text
+  feat, fix, chore, docs, refactor, test, ci, build, perf, style, revert, hotfix
+  ```
+
+  Area:
+
+  Use a concrete touched directory or module.
+
+### Reporting
+
+- Report branch lifecycle events only when they happen, using the reporting format below.
+
+  Format:
+
+  ```text
+  [branch] INFO create: name=<branch-name> base=<base-branch>
+  [branch] INFO continue: name=<branch-name>
+  [branch] INFO finish: name=<branch-name> target=<target-branch> method=<merge-method>
+  [branch] INFO pr: title=<pr-title> url=<pr-url> method=squash
+  ```
+
 ## Character set
 
 Use ASCII characters only in all project-related content unless the user explicitly requests otherwise.
 
 ## Git safety
-
-### Protect the working branch
-
-If a temporary branch is available, commit any changes to the temporary branch; otherwise, use stash or patch to save progress.
-
-Do not create commits on the USER-OWNED working branch unless explicitly requested.
-
-Ask for a commit message before committing to the USER-OWNED working branch if none is provided.
-
-### Roll back only from Git
 
 Without Git history, do not perform rollback or attempt to recover a previous file state based on model inference.
 
