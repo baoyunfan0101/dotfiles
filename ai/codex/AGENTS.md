@@ -142,3 +142,15 @@
   [commit] INFO push: remote=<remote-name> branch=<branch-name>
   [commit] ERROR push: output="<command-output>"
   ```
+
+## Rollback
+
+- When asked to roll back to a commit, use Git history.
+
+- When asked to roll back to before a commit or Codex turn, prefer the matching snapshot.
+  - Match `.codex-safety/<thread-id>/<turn-id>/` to the requested Codex task or turn metadata.
+  - Inspect `meta.txt`, `head.txt`, and `status.txt` first.
+  - Restore tracked changes from `worktree.patch` and `index.patch`.
+  - Restore untracked files from `untracked.tar` when present.
+
+- Do not reconstruct previous file states from memory.
