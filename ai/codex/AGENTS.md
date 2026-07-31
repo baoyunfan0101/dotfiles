@@ -82,6 +82,47 @@
   [branch] INFO delete: name=<branch-name> location=<local|remote|local-and-remote>
   ```
 
+## Commit workflow
+
+### Lifecycle
+
+- Before making commit or push decisions, run `~/.codex/bin/project-settings commit_mode` and handle `commit_mode`.
+  - `commit_mode=manual`: do not commit or push unless explicitly requested.
+  - `commit_mode=automatic`: commit each atomic change separately, then push the resulting commits.
+  - Failure: report `[commit] ERROR project-settings: output="<command-output>"`, and do not commit or push unless explicitly requested.
+
+### Naming
+
+- Follow the repository's existing commit message style when available; otherwise, use the default commit format below.
+
+  Format:
+
+  ```text
+  <type>(<area>): <concise-summary>
+  ```
+
+  Type prefixes:
+
+  ```text
+  feat, fix, chore, docs, refactor, test, ci, build, perf, style, revert, hotfix
+  ```
+
+  Area:
+
+  Use a concrete touched directory or module.
+
+### Reporting
+
+- Report commit lifecycle events only when they happen, using the reporting format below.
+
+  Format:
+
+  ```text
+  [commit] INFO create: sha=<commit-sha> message="<commit-message>"
+  [commit] INFO push: remote=<remote-name> branch=<branch-name>
+  [commit] ERROR push: output="<command-output>"
+  ```
+
 ## Character set
 
 Use ASCII characters only in all project-related content unless the user explicitly requests otherwise.
