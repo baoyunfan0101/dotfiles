@@ -3,16 +3,27 @@ set -euo pipefail
 
 FORCE=false
 CLEAN=false
+INSTALL_MODE="${DOTFILES_INSTALL_MODE:-symlink}"
 
 usage() {
   cat >&2 <<EOF
-Usage: $0 [--force] [--clean]
+Usage: $0 [--mode symlink|copy] [--force] [--clean]
 
 Default:
-  Recreate symlinks and replace empty files.
+  Install using symlinks and replace empty files.
   Keep real files/directories untouched.
+  Set DOTFILES_INSTALL_MODE=copy to change the default mode.
 
 Options:
+  -m, --mode MODE
+      Install mode: symlink or copy.
+
+  --symlink
+      Install using symlinks.
+
+  --copy
+      Install by copying files/directories.
+
   -f, --force
       Replace conflicting real files/directories.
 
@@ -26,6 +37,28 @@ EOF
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    -m|--mode)
+      if [ $# -lt 2 ]; then
+        echo "Missing value for $1" >&2
+        usage
+        exit 1
+      fi
+
+      INSTALL_MODE="$2"
+      shift 2
+      ;;
+    --mode=*)
+      INSTALL_MODE="${1#*=}"
+      shift
+      ;;
+    --symlink)
+      INSTALL_MODE="symlink"
+      shift
+      ;;
+    --copy)
+      INSTALL_MODE="copy"
+      shift
+      ;;
     -f|--force)
       FORCE=true
       shift
@@ -45,6 +78,16 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+case "$INSTALL_MODE" in
+  symlink|copy)
+    ;;
+  *)
+    echo "Invalid install mode: $INSTALL_MODE" >&2
+    usage
+    exit 1
+    ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CODEX_SOURCE_DIR="${CODEX_SOURCE_DIR:-$SCRIPT_DIR}"
@@ -94,7 +137,7 @@ remove_target_if_allowed() {
   exit 1
 }
 
-link_path() {
+install_path() {
   local source_path="$1"
   local target_path="$2"
 
@@ -103,11 +146,19 @@ link_path() {
 
   remove_target_if_allowed "$target_path"
 
-  ln -s "$source_path" "$target_path"
-  echo "Linked: $target_path -> $source_path"
+  case "$INSTALL_MODE" in
+    symlink)
+      ln -s "$source_path" "$target_path"
+      echo "Linked: $target_path -> $source_path"
+      ;;
+    copy)
+      cp -R "$source_path" "$target_path"
+      echo "Copied: $source_path -> $target_path"
+      ;;
+  esac
 }
 
-link_dir_contents() {
+install_dir_contents() {
   local source_dir="$1"
   local target_dir="$2"
 
@@ -128,10 +179,7 @@ link_dir_contents() {
     name="$(basename "$source_path")"
     target_path="$target_dir/$name"
 
-    remove_target_if_allowed "$target_path"
-
-    ln -s "$source_path" "$target_path"
-    echo "Linked: $target_path -> $source_path"
+    install_path "$source_path" "$target_path"
   done
 }
 
@@ -172,8 +220,8 @@ clean_stale_dir_links() {
 
 mkdir -p "$CODEX_HOME"
 
-link_path "$AGENTS_SOURCE" "$AGENTS_TARGET"
-link_dir_contents "$SKILLS_SOURCE" "$SKILLS_TARGET"
-link_dir_contents "$BIN_SOURCE" "$BIN_TARGET"
+install_path "$AGENTS_SOURCE" "$AGENTS_TARGET"
+install_dir_contents "$SKILLS_SOURCE" "$SKILLS_TARGET"
+install_dir_contents "$BIN_SOURCE" "$BIN_TARGET"
 clean_stale_dir_links "$SKILLS_SOURCE" "$SKILLS_TARGET"
 clean_stale_dir_links "$BIN_SOURCE" "$BIN_TARGET"
