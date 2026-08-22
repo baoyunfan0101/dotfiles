@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+
+import json
+import subprocess
+import sys
+from copy import deepcopy
+from pathlib import Path
+
+
+DEFAULT_SETTINGS = {
+    "schemaVersion": 1,
+    "git": {
+        "sync": {
+            "mode": "update",
+            "updateMethod": "ffOnly",
+        },
+        "backup": {
+            "mode": "all",
+            "method": "stash",
+        },
+        "commit": {
+            "mode": "automatic",
+        },
+        "branch": {
+            "mode": "fromBase",
+            "baseBranches": ["main"],
+            "deleteAfterIntegration": False,
+        },
+        "integration": {
+            "mode": "localMerge",
+            "mergeMethod": "mergeCommit",
+        },
+    },
+}
+
+SCHEMA = {
+    "schemaVersion": int,
+    "git": {
+        "sync": {
+            "mode": str,
+            "updateMethod": str,
+        },
+        "backup": {
+            "mode": str,
+            "method": str,
+        },
+        "commit": {
+            "mode": str,
+        },
+        "branch": {
+            "mode": str,
+            "baseBranches": list,
+            "deleteAfterIntegration": bool,
+        },
+        "integration": {
+            "mode": str,
+            "mergeMethod": str,
+        },
+    },
+}
+
+ALLOWED_VALUES = {
+    "git.sync.mode": {"none", "fetch", "update"},
+    "git.sync.updateMethod": {"ffOnly", "rebase", "merge"},
+    "git.backup.mode": {"none", "tracked", "untracked", "all"},
+    "git.backup.method": {"stash", "commit"},
+    "git.commit.mode": {"manual", "automatic"},
+    "git.branch.mode": {"current", "alwaysCreate", "fromBase"},
+    "git.integration.mode": {"localMerge", "pullRequest"},
+    "git.integration.mergeMethod": {"squash", "mergeCommit"},
+}
+
+
+def fail(message):
+    print(f"project-settings: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def find_project_root():
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode == 0:
+        return Path(result.stdout.strip())
+
+    return Path.cwd()
+
+
+def merge_settings(defaults, overrides):
+    result = deepcopy(defaults)
+
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = merge_settings(result[key], value)
+        else:
+            result[key] = value
+
+    return result
+
+
+def validate_structure(value, schema, path=""):
+    if not isinstance(value, dict):
+        fail(f"{path or 'root'} must be an object")
+
+    unknown_keys = set(value) - set(schema)
+
+    if unknown_keys:
+        key = sorted(unknown_keys)[0]
+        full_path = f"{path}.{key}" if path else key
+        fail(f"unknown setting: {full_path}")
+
+    for key, item in value.items():
+        expected = schema[key]
+        current_path = f"{path}.{key}" if path else key
+
+        if isinstance(expected, dict):
+            validate_structure(item, expected, current_path)
+        elif not isinstance(item, expected):
+            fail(f"{current_path} has an invalid type")
+
+
+def get_value(settings, path):
+    value = settings
+
+    for key in path.split("."):
+        if not isinstance(value, dict) or key not in value:
+            fail(f"unknown setting: {path}")
+
+        value = value[key]
+
+    return value
+
+
+def validate_values(settings):
+    if settings["schemaVersion"] != 1:
+        fail(f"unsupported schemaVersion: {settings['schemaVersion']}")
+
+    for path, allowed_values in ALLOWED_VALUES.items():
+        value = get_value(settings, path)
+
+        if value not in allowed_values:
+            allowed = ", ".join(sorted(allowed_values))
+            fail(f"{path} must be one of: {allowed}")
+
+    base_branches = settings["git"]["branch"]["baseBranches"]
+
+    if not all(
+        isinstance(branch, str) and branch
+        for branch in base_branches
+    ):
+        fail("git.branch.baseBranches must contain non-empty strings")
+
+    if len(base_branches) != len(set(base_branches)):
+        fail("git.branch.baseBranches must not contain duplicates")
+
+    if (
+        settings["git"]["branch"]["mode"] == "fromBase"
+        and not base_branches
+    ):
+        fail(
+            "git.branch.baseBranches must not be empty "
+            "when git.branch.mode is fromBase"
+        )
+
+
+def load_settings():
+    config_path = find_project_root() / ".ai" / "project.json"
+
+    if not config_path.exists():
+        return deepcopy(DEFAULT_SETTINGS)
+
+    try:
+        with config_path.open(encoding="utf-8") as file:
+            overrides = json.load(file)
+    except json.JSONDecodeError as error:
+        fail(f"invalid JSON in {config_path}: {error}")
+    except OSError as error:
+        fail(f"cannot read {config_path}: {error}")
+
+    validate_structure(overrides, SCHEMA)
+
+    if "schemaVersion" not in overrides:
+        fail("schemaVersion is required")
+
+    if overrides["schemaVersion"] != 1:
+        fail(f"unsupported schemaVersion: {overrides['schemaVersion']}")
+
+    settings = merge_settings(DEFAULT_SETTINGS, overrides)
+
+    validate_values(settings)
+
+    return settings
+
+
+def print_value(value):
+    if isinstance(value, bool):
+        print("true" if value else "false")
+    elif isinstance(value, (dict, list)):
+        print(json.dumps(value, separators=(",", ":")))
+    else:
+        print(value)
+
+
+def main():
+    settings = load_settings()
+
+    if len(sys.argv) == 2 and sys.argv[1] == "effective":
+        print(json.dumps(settings, indent=2))
+        return
+
+    if len(sys.argv) == 3 and sys.argv[1] == "get":
+        print_value(get_value(settings, sys.argv[2]))
+        return
+
+    print(
+        "Usage: project-settings effective | "
+        "project-settings get <path>",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()
