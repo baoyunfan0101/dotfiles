@@ -37,6 +37,8 @@ PR_BODY_FILE=""
 ORIGINAL_BRANCH=""
 WORKING_BRANCH=""
 BRANCH_CREATED=false
+CURRENT_ACTION="workflow"
+INTEGRATION_BRANCH_DELETED=false
 
 usage() {
   cat <<EOF2
@@ -101,7 +103,7 @@ EOF2
 }
 
 fail() {
-  echo "git-workflow: $*" >&2
+  printf '[git] %s error reason="%s"\n' "$CURRENT_ACTION" "$*" >&2
   exit 1
 }
 
@@ -432,7 +434,7 @@ sync_current_branch() {
       ;;
     fetch)
       remote="$(remote_for_branch "$branch")"
-      git fetch "$remote"
+      git fetch --quiet "$remote"
       SYNC_RESULT="fetched"
       ;;
     update)
@@ -443,17 +445,17 @@ sync_current_branch() {
         fail "current branch has no upstream: $branch"
       fi
 
-      git fetch "$remote"
+      git fetch --quiet "$remote"
 
       case "$SYNC_UPDATE_METHOD" in
         ffOnly)
-          git merge --ff-only "$upstream"
+          git merge --quiet --ff-only "$upstream"
           ;;
         rebase)
-          git rebase "$upstream"
+          git rebase --quiet "$upstream"
           ;;
         merge)
-          git merge --no-edit "$upstream"
+          git merge --quiet --no-edit "$upstream"
           ;;
         *)
           fail "unsupported git.sync.updateMethod: $SYNC_UPDATE_METHOD"
@@ -478,9 +480,9 @@ push_branch() {
   merge_ref="$(git config --get "branch.$branch.merge" || true)"
 
   if [[ -n "$merge_ref" ]]; then
-    git push "$remote" "$branch"
+    git push --quiet "$remote" "$branch"
   else
-    git push --set-upstream "$remote" "$branch"
+    git push --quiet --set-upstream "$remote" "$branch"
   fi
 }
 
@@ -512,7 +514,7 @@ create_task_branch() {
     fail "branch already exists: $BRANCH_NAME"
   fi
 
-  git checkout -b "$BRANCH_NAME" >/dev/null
+  git checkout -q -b "$BRANCH_NAME"
   BRANCH_CREATED=true
   mark_workflow_branch "$BRANCH_NAME" "$ORIGINAL_BRANCH"
 }
@@ -706,17 +708,22 @@ load_integration_settings() {
 }
 
 print_prepare_result() {
-  printf 'backup_mode=%s\n' "$BACKUP_MODE"
-  printf 'backup_method=%s\n' "$BACKUP_METHOD"
-  printf 'backup_ref=%s\n' "$BACKUP_REF"
-  printf 'sync_mode=%s\n' "$SYNC_MODE"
-  printf 'sync_result=%s\n' "$SYNC_RESULT"
-  printf 'branch=%s\n' "$WORKING_BRANCH"
-  printf 'branch_created=%s\n' "$BRANCH_CREATED"
-  printf 'base_branch=%s\n' "$ORIGINAL_BRANCH"
+  local backup_result="none"
+
+  if [[ "$BACKUP_CREATED" == true ]]; then
+    backup_result="$BACKUP_METHOD"
+  fi
+
+  printf '[git] prepare ok backup=%s sync=%s branch=%s base=%s created=%s\n' \
+    "$backup_result" \
+    "$SYNC_RESULT" \
+    "$WORKING_BRANCH" \
+    "$ORIGINAL_BRANCH" \
+    "$BRANCH_CREATED"
 }
 
 prepare() {
+  CURRENT_ACTION="prepare"
   parse_prepare_args "$@"
   require_repository
 
@@ -733,6 +740,7 @@ prepare() {
 }
 
 commit_changes() {
+  CURRENT_ACTION="commit"
   local branch
   local base_branch
   local commit_sha
@@ -744,7 +752,7 @@ commit_changes() {
   case "$COMMIT_MODE" in
     manual)
       if [[ "$COMMIT_OVERRIDE_MANUAL" != true ]]; then
-        printf 'commit=skipped\nreason=manual\n'
+        printf '[git] commit skip reason=manual\n'
         return 0
       fi
       ;;
@@ -758,7 +766,7 @@ commit_changes() {
   if [[ "$COMMIT_ALL" == true ]]; then
     git add -A
     git diff --cached --quiet && fail "no changes to commit"
-    git commit -m "$COMMIT_MESSAGE"
+    git commit --quiet -m "$COMMIT_MESSAGE"
   else
     git add -A -- "${COMMIT_PATHS[@]}"
 
@@ -766,31 +774,28 @@ commit_changes() {
       fail "selected paths have no changes to commit"
     fi
 
-    git commit -m "$COMMIT_MESSAGE" -- "${COMMIT_PATHS[@]}"
+    git commit --quiet -m "$COMMIT_MESSAGE" -- "${COMMIT_PATHS[@]}"
   fi
 
   commit_sha="$(git rev-parse HEAD)"
   branch="$(current_branch)"
 
-  printf 'commit=%s\n' "$commit_sha"
-  printf 'branch=%s\n' "$branch"
-
   if [[ "$COMMIT_MODE" == "manual" ]]; then
-    printf 'pushed=false\n'
+    printf '[git] commit ok sha=%s branch=%s pushed=false\n' "${commit_sha:0:7}" "$branch"
     return 0
   fi
 
   base_branch="$(workflow_base_branch "$branch")"
 
   if ! push_branch "$branch" "$base_branch"; then
-    printf 'pushed=false\n'
-    fail "commit was created but push failed"
+    fail "commit ${commit_sha:0:7} created but push failed"
   fi
 
-  printf 'pushed=true\n'
+  printf '[git] commit ok sha=%s branch=%s pushed=true\n' "${commit_sha:0:7}" "$branch"
 }
 
 push_changes() {
+  CURRENT_ACTION="push"
   local branch
   local base_branch
 
@@ -801,7 +806,7 @@ push_changes() {
   case "$COMMIT_MODE" in
     manual)
       if [[ "$PUSH_OVERRIDE_MANUAL" != true ]]; then
-        printf 'push=skipped\nreason=manual\n'
+        printf '[git] push skip reason=manual\n'
         return 0
       fi
       ;;
@@ -816,8 +821,7 @@ push_changes() {
   base_branch="$(workflow_base_branch "$branch")"
   push_branch "$branch" "$base_branch"
 
-  printf 'push=true\n'
-  printf 'branch=%s\n' "$branch"
+  printf '[git] push ok branch=%s\n' "$branch"
 }
 
 delete_integrated_branch() {
@@ -829,20 +833,20 @@ delete_integrated_branch() {
   remote="$(remote_for_branch "$working_branch" "$base_branch")"
 
   if git ls-remote --exit-code --heads "$remote" "$working_branch" >/dev/null 2>&1; then
-    git push "$remote" --delete "$working_branch"
+    git push --quiet "$remote" --delete "$working_branch"
     remote_deleted=true
   fi
 
   if [[ "$INTEGRATION_MERGE_METHOD" == "squash" ]]; then
-    git branch -D "$working_branch"
+    git branch -D "$working_branch" >/dev/null
   else
-    git branch -d "$working_branch"
+    git branch -d "$working_branch" >/dev/null
   fi
 
   if [[ "$remote_deleted" == true ]]; then
-    printf 'branch_deleted=local-and-remote\n'
+    INTEGRATION_BRANCH_DELETED="local-and-remote"
   else
-    printf 'branch_deleted=local\n'
+    INTEGRATION_BRANCH_DELETED="local"
   fi
 }
 
@@ -856,7 +860,7 @@ integrate_local_merge() {
     fail "--message is required when git.integration.mergeMethod is squash"
   fi
 
-  git checkout "$base_branch" >/dev/null
+  git checkout -q "$base_branch"
   sync_current_branch "$base_branch"
 
   case "$INTEGRATION_MERGE_METHOD" in
@@ -867,9 +871,9 @@ integrate_local_merge() {
 
       if [[ "$merge_needed" == true ]]; then
         if [[ -n "$INTEGRATION_MESSAGE" ]]; then
-          git merge --no-ff -m "$INTEGRATION_MESSAGE" "$working_branch"
+          git merge --quiet --no-ff -m "$INTEGRATION_MESSAGE" "$working_branch"
         else
-          git merge --no-ff --no-edit "$working_branch"
+          git merge --quiet --no-ff --no-edit "$working_branch"
         fi
       fi
       ;;
@@ -879,8 +883,8 @@ integrate_local_merge() {
       fi
 
       if [[ "$merge_needed" == true ]]; then
-        git merge --squash "$working_branch"
-        git commit -m "$INTEGRATION_MESSAGE"
+        git merge --quiet --squash "$working_branch"
+        git commit --quiet -m "$INTEGRATION_MESSAGE"
       fi
       ;;
     *)
@@ -895,19 +899,19 @@ integrate_local_merge() {
     fail "integration completed locally but push failed; workflow state was preserved"
   fi
 
-  printf 'integration=localMerge\n'
-  printf 'base_branch=%s\n' "$base_branch"
-  printf 'working_branch=%s\n' "$working_branch"
-  printf 'merge_method=%s\n' "$INTEGRATION_MERGE_METHOD"
-  printf 'commit=%s\n' "$integration_sha"
-
   if [[ "$DELETE_AFTER_INTEGRATION" == true ]]; then
     delete_integrated_branch "$working_branch" "$base_branch"
     clear_workflow_branch "$working_branch"
   else
     clear_workflow_branch "$working_branch"
-    printf 'branch_deleted=false\n'
+    INTEGRATION_BRANCH_DELETED=false
   fi
+
+  printf '[git] integrate ok mode=localMerge target=%s method=%s sha=%s deleted=%s\n' \
+    "$base_branch" \
+    "$INTEGRATION_MERGE_METHOD" \
+    "${integration_sha:0:7}" \
+    "$INTEGRATION_BRANCH_DELETED"
 }
 
 create_pull_request() {
@@ -930,13 +934,14 @@ create_pull_request() {
     fi
   fi
 
-  printf 'integration=pullRequest\n'
-  printf 'base_branch=%s\n' "$base_branch"
-  printf 'working_branch=%s\n' "$working_branch"
-  printf 'url=%s\n' "$pr_url"
+  printf '[git] integrate ok mode=pullRequest target=%s branch=%s url=%s\n' \
+    "$base_branch" \
+    "$working_branch" \
+    "$pr_url"
 }
 
 integrate() {
+  CURRENT_ACTION="integrate"
   local working_branch
   local base_branch
   local branch_created
@@ -950,7 +955,7 @@ integrate() {
   branch_created="$(workflow_branch_created "$working_branch")"
 
   if [[ "$branch_created" != true || -z "$base_branch" ]]; then
-    printf 'integration=skipped\nreason=no-workflow-created-branch\n'
+    printf '[git] integrate skip reason=no-workflow-created-branch\n'
     return 0
   fi
 
