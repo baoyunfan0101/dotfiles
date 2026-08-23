@@ -7,6 +7,8 @@ BACKUP_MODE=""
 BACKUP_METHOD=""
 BACKUP_REF="none"
 BACKUP_CREATED=false
+BACKUP_TRANSPORT_SHA=""
+BACKUP_TRANSPORT_KEEP=false
 
 SYNC_MODE=""
 SYNC_UPDATE_METHOD=""
@@ -15,28 +17,87 @@ SYNC_RESULT="skipped"
 BRANCH_MODE=""
 BASE_BRANCHES_JSON="[]"
 
+COMMIT_MODE=""
+COMMIT_MESSAGE=""
+COMMIT_ALL=false
+COMMIT_OVERRIDE_MANUAL=false
+COMMIT_PATHS=()
+COMMIT_PATH_COUNT=0
+
+PUSH_OVERRIDE_MANUAL=false
+
+INTEGRATION_MODE=""
+INTEGRATION_MERGE_METHOD=""
+DELETE_AFTER_INTEGRATION=false
+INTEGRATION_MESSAGE=""
+PR_TITLE=""
+PR_BODY=""
+PR_BODY_FILE=""
+
 ORIGINAL_BRANCH=""
 WORKING_BRANCH=""
 BRANCH_CREATED=false
 
 usage() {
-  cat <<EOF
+  cat <<EOF2
 Usage:
   git-workflow prepare [--branch-name NAME]
+  git-workflow commit [--override-manual] --message MESSAGE (--all | -- PATH...)
+  git-workflow push [--override-manual]
+  git-workflow integrate [options]
 
 Commands:
   prepare
       Back up selected local changes, synchronize the current branch,
       select or create the working branch, and reapply the backup.
 
-Options:
+  commit
+      Commit one atomic change. Automatic mode also pushes it.
+
+  push
+      Push the current branch according to project settings.
+
+  integrate
+      Integrate a workflow-created branch according to project settings.
+
+Prepare options:
   --branch-name NAME
-      Candidate task branch name. Required only when the configured
-      branch mode requires creating a branch.
+      Candidate task branch name.
+
+Commit options:
+  --message MESSAGE
+      Commit message.
+
+  --all
+      Commit all current changes.
+
+  --override-manual
+      Allow an explicitly requested commit when git.commit.mode is manual.
+      The commit is created but is not pushed automatically.
+
+  -- PATH...
+      Commit only the selected paths.
+
+Push options:
+  --override-manual
+      Allow an explicitly requested push when git.commit.mode is manual.
+
+Integration options:
+  --message MESSAGE
+      Squash commit message, or optional merge-commit message.
+
+  --title TITLE
+      Pull request title.
+
+  --body BODY
+      Pull request body.
+
+  --body-file FILE
+      Read the pull request body from FILE.
 
   -h, --help
       Show this help.
-EOF
+EOF2
 }
 
 fail() {
@@ -56,6 +117,15 @@ setting() {
   agent-project-settings get "$1"
 }
 
+require_repository() {
+  require_command git
+  require_command agent-project-settings
+
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    fail "current directory is not inside a Git worktree"
+  fi
+}
+
 current_branch() {
   local branch
 
@@ -66,6 +136,29 @@ current_branch() {
   fi
 
   printf '%s\n' "$branch"
+}
+
+workflow_base_branch() {
+  git config --get "branch.$1.agentWorkflowBase" || true
+}
+
+workflow_branch_created() {
+  git config --bool --get "branch.$1.agentWorkflowCreated" || printf 'false\n'
+}
+
+mark_workflow_branch() {
+  local branch="$1"
+  local base_branch="$2"
+
+  git config "branch.$branch.agentWorkflowBase" "$base_branch"
+  git config "branch.$branch.agentWorkflowCreated" true
+}
+
+clear_workflow_branch() {
+  local branch="$1"
+
+  git config --unset-all "branch.$branch.agentWorkflowBase" >/dev/null 2>&1 || true
+  git config --unset-all "branch.$branch.agentWorkflowCreated" >/dev/null 2>&1 || true
 }
 
 has_tracked_changes() {
@@ -83,70 +176,169 @@ has_untracked_changes() {
   [[ -n "$untracked" ]]
 }
 
-create_stash_backup() {
-  local message
+has_local_changes() {
+  if has_tracked_changes || has_untracked_changes; then
+    return 0
+  fi
 
-  message="agent-workflow backup $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  return 1
+}
+
+selected_changes_exist() {
+  case "$BACKUP_MODE" in
+    none)
+      return 1
+      ;;
+    tracked)
+      has_tracked_changes
+      ;;
+    untracked)
+      has_untracked_changes
+      ;;
+    all)
+      has_local_changes
+      ;;
+    *)
+      fail "unsupported git.backup.mode: $BACKUP_MODE"
+      ;;
+  esac
+}
+
+stash_selected_changes() {
+  local message="$1"
+  local untracked_paths=()
+  local untracked_count=0
+  local path
+
+  BACKUP_TRANSPORT_SHA=""
 
   case "$BACKUP_MODE" in
     none)
       return 0
       ;;
-
     tracked)
       if ! has_tracked_changes; then
         return 0
       fi
 
-      git stash push \
-        -m "$message" \
-        >/dev/null
+      git stash push -m "$message" >/dev/null
       ;;
-
     untracked)
-      local untracked_paths=()
-      local untracked_count=0
-      local path
-
       while IFS= read -r -d '' path; do
         untracked_paths+=("$path")
         ((untracked_count += 1))
-      done < <(
-        git ls-files \
-          --others \
-          --exclude-standard \
-          -z
-      )
+      done < <(git ls-files --others --exclude-standard -z)
 
       if ((untracked_count == 0)); then
         return 0
       fi
 
-      git stash push \
-        -u \
-        -m "$message" \
-        -- "${untracked_paths[@]}" \
-        >/dev/null
+      git stash push -u -m "$message" -- "${untracked_paths[@]}" >/dev/null
       ;;
-
     all)
-      if ! has_tracked_changes && ! has_untracked_changes; then
+      if ! has_local_changes; then
         return 0
       fi
 
-      git stash push \
-        -u \
-        -m "$message" \
-        >/dev/null
+      git stash push -u -m "$message" >/dev/null
       ;;
-
     *)
       fail "unsupported git.backup.mode: $BACKUP_MODE"
       ;;
   esac
 
-  BACKUP_REF="$(git rev-parse --verify refs/stash)"
+  BACKUP_TRANSPORT_SHA="$(git rev-parse --verify refs/stash)"
+}
+
+create_stash_backup() {
+  local message
+
+  message="agent-workflow backup $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  stash_selected_changes "$message"
+
+  if [[ -z "$BACKUP_TRANSPORT_SHA" ]]; then
+    return 0
+  fi
+
+  BACKUP_REF="$BACKUP_TRANSPORT_SHA"
   BACKUP_CREATED=true
+  BACKUP_TRANSPORT_KEEP=true
+}
+
+create_commit_backup_ref() {
+  local timestamp
+  local backup_ref
+  local tmp_index
+  local tree
+  local commit_sha
+  local message
+  local untracked_paths=()
+  local untracked_count=0
+  local path
+
+  if ! selected_changes_exist; then
+    return 0
+  fi
+
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  backup_ref="refs/agent-workflow/backups/${timestamp}-$$"
+  message="agent-workflow backup $timestamp"
+
+  tmp_index="$(mktemp "${TMPDIR:-/tmp}/agent-workflow-index.XXXXXX")"
+  rm -f "$tmp_index"
+
+
+  GIT_INDEX_FILE="$tmp_index" git read-tree HEAD
+
+  case "$BACKUP_MODE" in
+    tracked)
+      GIT_INDEX_FILE="$tmp_index" git add -u --
+      ;;
+    untracked)
+      while IFS= read -r -d '' path; do
+        untracked_paths+=("$path")
+        ((untracked_count += 1))
+      done < <(git ls-files --others --exclude-standard -z)
+
+      if ((untracked_count > 0)); then
+        GIT_INDEX_FILE="$tmp_index" git add -- "${untracked_paths[@]}"
+      fi
+      ;;
+    all)
+      GIT_INDEX_FILE="$tmp_index" git add -A --
+      ;;
+    *)
+      fail "unsupported git.backup.mode: $BACKUP_MODE"
+      ;;
+  esac
+
+  tree="$(GIT_INDEX_FILE="$tmp_index" git write-tree)"
+  commit_sha="$(printf '%s\n' "$message" | git commit-tree "$tree" -p HEAD)"
+  git update-ref "$backup_ref" "$commit_sha"
+
+  BACKUP_REF="$backup_ref"
+  BACKUP_CREATED=true
+
+  rm -f "$tmp_index"
+}
+
+create_commit_backup() {
+  local message
+
+  create_commit_backup_ref
+
+  if [[ "$BACKUP_CREATED" != true ]]; then
+    return 0
+  fi
+
+  message="agent-workflow transport $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  stash_selected_changes "$message"
+
+  if [[ -z "$BACKUP_TRANSPORT_SHA" ]]; then
+    fail "failed to create temporary transport stash for commit backup"
+  fi
+
+  BACKUP_TRANSPORT_KEEP=false
 }
 
 create_backup() {
@@ -158,45 +350,79 @@ create_backup() {
     stash)
       create_stash_backup
       ;;
-
     commit)
-      fail "git.backup.method=commit is not implemented yet"
+      create_commit_backup
       ;;
-
     *)
       fail "unsupported git.backup.method: $BACKUP_METHOD"
       ;;
   esac
 }
 
+stash_name_for_sha() {
+  local target_sha="$1"
+  local stash_name
+  local stash_sha
+
+  while read -r stash_name stash_sha; do
+    if [[ "$stash_sha" == "$target_sha" ]]; then
+      printf '%s\n' "$stash_name"
+      return 0
+    fi
+  done < <(git stash list --format='%gd %H')
+
+  return 1
+}
+
 reapply_backup() {
-  if [[ "$BACKUP_CREATED" != true ]]; then
+  local stash_name
+
+  if [[ -z "$BACKUP_TRANSPORT_SHA" ]]; then
     return 0
   fi
 
-  git stash apply \
-    --index \
-    "$BACKUP_REF" \
-    >/dev/null
+  git stash apply --index "$BACKUP_TRANSPORT_SHA" >/dev/null
+
+  if [[ "$BACKUP_TRANSPORT_KEEP" == false ]]; then
+    stash_name="$(stash_name_for_sha "$BACKUP_TRANSPORT_SHA" || true)"
+
+    if [[ -n "$stash_name" ]]; then
+      git stash drop "$stash_name" >/dev/null
+    fi
+  fi
 }
 
-remote_for_current_branch() {
+remote_for_branch() {
+  local branch="$1"
+  local fallback_branch="${2:-}"
   local remote
 
-  remote="$(
-    git config \
-      --get "branch.$ORIGINAL_BRANCH.remote" \
-      || true
-  )"
+  remote="$(git config --get "branch.$branch.remote" || true)"
 
-  if [[ -z "$remote" || "$remote" == "." ]]; then
-    fail "current branch has no remote"
+  if [[ -n "$remote" && "$remote" != "." ]]; then
+    printf '%s\n' "$remote"
+    return 0
   fi
 
-  printf '%s\n' "$remote"
+  if [[ -n "$fallback_branch" ]]; then
+    remote="$(git config --get "branch.$fallback_branch.remote" || true)"
+
+    if [[ -n "$remote" && "$remote" != "." ]]; then
+      printf '%s\n' "$remote"
+      return 0
+    fi
+  fi
+
+  if git remote get-url origin >/dev/null 2>&1; then
+    printf 'origin\n'
+    return 0
+  fi
+
+  fail "cannot determine remote for branch: $branch"
 }
 
-sync_repository() {
+sync_current_branch() {
+  local branch="$1"
   local remote
   local upstream
 
@@ -204,50 +430,31 @@ sync_repository() {
     none)
       SYNC_RESULT="skipped"
       ;;
-
     fetch)
-      remote="$(remote_for_current_branch)"
-
+      remote="$(remote_for_branch "$branch")"
       git fetch "$remote"
-
       SYNC_RESULT="fetched"
       ;;
-
     update)
-      remote="$(remote_for_current_branch)"
-
-      upstream="$(
-        git rev-parse \
-          --abbrev-ref \
-          --symbolic-full-name \
-          '@{upstream}' \
-          2>/dev/null \
-          || true
-      )"
+      remote="$(remote_for_branch "$branch")"
+      upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
 
       if [[ -z "$upstream" ]]; then
-        fail "current branch has no upstream"
+        fail "current branch has no upstream: $branch"
       fi
 
       git fetch "$remote"
 
       case "$SYNC_UPDATE_METHOD" in
         ffOnly)
-          git merge \
-            --ff-only \
-            "$upstream"
+          git merge --ff-only "$upstream"
           ;;
-
         rebase)
           git rebase "$upstream"
           ;;
-
         merge)
-          git merge \
-            --no-edit \
-            "$upstream"
+          git merge --no-edit "$upstream"
           ;;
-
         *)
           fail "unsupported git.sync.updateMethod: $SYNC_UPDATE_METHOD"
           ;;
@@ -255,25 +462,39 @@ sync_repository() {
 
       SYNC_RESULT="updated"
       ;;
-
     *)
       fail "unsupported git.sync.mode: $SYNC_MODE"
       ;;
   esac
 }
 
+push_branch() {
+  local branch="$1"
+  local fallback_branch="${2:-}"
+  local remote
+  local merge_ref
+
+  remote="$(remote_for_branch "$branch" "$fallback_branch")"
+  merge_ref="$(git config --get "branch.$branch.merge" || true)"
+
+  if [[ -n "$merge_ref" ]]; then
+    git push "$remote" "$branch"
+  else
+    git push --set-upstream "$remote" "$branch"
+  fi
+}
+
 is_base_branch() {
   local branch="$1"
 
-  python3 \
-    - "$branch" "$BASE_BRANCHES_JSON" \
-    <<'PY'
+  require_command python3
+
+  python3 - "$branch" "$BASE_BRANCHES_JSON" <<'PY'
 import json
 import sys
 
 branch = sys.argv[1]
 base_branches = json.loads(sys.argv[2])
-
 raise SystemExit(0 if branch in base_branches else 1)
 PY
 }
@@ -283,41 +504,31 @@ create_task_branch() {
     fail "--branch-name is required by the configured branch mode"
   fi
 
-  if ! git check-ref-format \
-    --branch "$BRANCH_NAME" \
-    >/dev/null 2>&1; then
+  if ! git check-ref-format --branch "$BRANCH_NAME" >/dev/null 2>&1; then
     fail "invalid branch name: $BRANCH_NAME"
   fi
 
-  if git show-ref \
-    --verify \
-    --quiet \
-    "refs/heads/$BRANCH_NAME"; then
+  if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
     fail "branch already exists: $BRANCH_NAME"
   fi
 
-  git checkout \
-    -b "$BRANCH_NAME" \
-    >/dev/null
-
+  git checkout -b "$BRANCH_NAME" >/dev/null
   BRANCH_CREATED=true
+  mark_workflow_branch "$BRANCH_NAME" "$ORIGINAL_BRANCH"
 }
 
 select_working_branch() {
   case "$BRANCH_MODE" in
     current)
       ;;
-
     alwaysCreate)
       create_task_branch
       ;;
-
     fromBase)
       if is_base_branch "$ORIGINAL_BRANCH"; then
         create_task_branch
       fi
       ;;
-
     *)
       fail "unsupported git.branch.mode: $BRANCH_MODE"
       ;;
@@ -328,24 +539,18 @@ parse_prepare_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --branch-name)
-        if [[ $# -lt 2 ]]; then
-          fail "missing value for --branch-name"
-        fi
-
+        [[ $# -ge 2 ]] || fail "missing value for --branch-name"
         BRANCH_NAME="$2"
         shift 2
         ;;
-
       --branch-name=*)
         BRANCH_NAME="${1#*=}"
         shift
         ;;
-
       -h|--help)
         usage
         exit 0
         ;;
-
       *)
         fail "unknown option: $1"
         ;;
@@ -353,27 +558,159 @@ parse_prepare_args() {
   done
 }
 
-load_settings() {
+parse_commit_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --message)
+        [[ $# -ge 2 ]] || fail "missing value for --message"
+        COMMIT_MESSAGE="$2"
+        shift 2
+        ;;
+      --message=*)
+        COMMIT_MESSAGE="${1#*=}"
+        shift
+        ;;
+      --all)
+        COMMIT_ALL=true
+        shift
+        ;;
+      --override-manual)
+        COMMIT_OVERRIDE_MANUAL=true
+        shift
+        ;;
+      --)
+        shift
+        while [[ $# -gt 0 ]]; do
+          COMMIT_PATHS+=("$1")
+          ((COMMIT_PATH_COUNT += 1))
+          shift
+        done
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        fail "unknown commit option: $1"
+        ;;
+    esac
+  done
+
+  [[ -n "$COMMIT_MESSAGE" ]] || fail "--message is required"
+
+  if [[ "$COMMIT_ALL" == true && "$COMMIT_PATH_COUNT" -gt 0 ]]; then
+    fail "--all cannot be combined with explicit paths"
+  fi
+
+  if [[ "$COMMIT_ALL" != true && "$COMMIT_PATH_COUNT" -eq 0 ]]; then
+    fail "use --all or provide paths after --"
+  fi
+}
+
+parse_push_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --override-manual)
+        PUSH_OVERRIDE_MANUAL=true
+        shift
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        fail "unknown push option: $1"
+        ;;
+    esac
+  done
+}
+
+parse_integration_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --message)
+        [[ $# -ge 2 ]] || fail "missing value for --message"
+        INTEGRATION_MESSAGE="$2"
+        shift 2
+        ;;
+      --message=*)
+        INTEGRATION_MESSAGE="${1#*=}"
+        shift
+        ;;
+      --title)
+        [[ $# -ge 2 ]] || fail "missing value for --title"
+        PR_TITLE="$2"
+        shift 2
+        ;;
+      --title=*)
+        PR_TITLE="${1#*=}"
+        shift
+        ;;
+      --body)
+        [[ $# -ge 2 ]] || fail "missing value for --body"
+        PR_BODY="$2"
+        shift 2
+        ;;
+      --body=*)
+        PR_BODY="${1#*=}"
+        shift
+        ;;
+      --body-file)
+        [[ $# -ge 2 ]] || fail "missing value for --body-file"
+        PR_BODY_FILE="$2"
+        shift 2
+        ;;
+      --body-file=*)
+        PR_BODY_FILE="${1#*=}"
+        shift
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        fail "unknown integration option: $1"
+        ;;
+    esac
+  done
+
+  if [[ -n "$PR_BODY" && -n "$PR_BODY_FILE" ]]; then
+    fail "--body and --body-file cannot be used together"
+  fi
+}
+
+load_prepare_settings() {
   agent-project-settings effective >/dev/null
 
   BACKUP_MODE="$(setting git.backup.mode)"
   BACKUP_METHOD="$(setting git.backup.method)"
-
   SYNC_MODE="$(setting git.sync.mode)"
   SYNC_UPDATE_METHOD="$(setting git.sync.updateMethod)"
-
   BRANCH_MODE="$(setting git.branch.mode)"
   BASE_BRANCHES_JSON="$(setting git.branch.baseBranches)"
 }
 
-print_result() {
+load_commit_settings() {
+  agent-project-settings effective >/dev/null
+  COMMIT_MODE="$(setting git.commit.mode)"
+}
+
+load_integration_settings() {
+  agent-project-settings effective >/dev/null
+
+  SYNC_MODE="$(setting git.sync.mode)"
+  SYNC_UPDATE_METHOD="$(setting git.sync.updateMethod)"
+  INTEGRATION_MODE="$(setting git.integration.mode)"
+  INTEGRATION_MERGE_METHOD="$(setting git.integration.mergeMethod)"
+  DELETE_AFTER_INTEGRATION="$(setting git.branch.deleteAfterIntegration)"
+}
+
+print_prepare_result() {
   printf 'backup_mode=%s\n' "$BACKUP_MODE"
   printf 'backup_method=%s\n' "$BACKUP_METHOD"
   printf 'backup_ref=%s\n' "$BACKUP_REF"
-
   printf 'sync_mode=%s\n' "$SYNC_MODE"
   printf 'sync_result=%s\n' "$SYNC_RESULT"
-
   printf 'branch=%s\n' "$WORKING_BRANCH"
   printf 'branch_created=%s\n' "$BRANCH_CREATED"
   printf 'base_branch=%s\n' "$ORIGINAL_BRANCH"
@@ -381,34 +718,257 @@ print_result() {
 
 prepare() {
   parse_prepare_args "$@"
-
-  require_command git
-  require_command python3
-  require_command agent-project-settings
-
-  if ! git rev-parse \
-    --is-inside-work-tree \
-    >/dev/null 2>&1; then
-    fail "current directory is not inside a Git worktree"
-  fi
+  require_repository
 
   ORIGINAL_BRANCH="$(current_branch)"
-
-  # Load every setting before backup mutates the working tree.
-  load_settings
-
-  if [[ "$BACKUP_MODE" != "none" && "$BACKUP_METHOD" == "commit" ]]; then
-    fail "git.backup.method=commit is not implemented yet"
-  fi
+  load_prepare_settings
 
   create_backup
-  sync_repository
+  sync_current_branch "$ORIGINAL_BRANCH"
   select_working_branch
   reapply_backup
 
   WORKING_BRANCH="$(current_branch)"
+  print_prepare_result
+}
 
-  print_result
+commit_changes() {
+  local branch
+  local base_branch
+  local commit_sha
+
+  parse_commit_args "$@"
+  require_repository
+  load_commit_settings
+
+  case "$COMMIT_MODE" in
+    manual)
+      if [[ "$COMMIT_OVERRIDE_MANUAL" != true ]]; then
+        printf 'commit=skipped\nreason=manual\n'
+        return 0
+      fi
+      ;;
+    automatic)
+      ;;
+    *)
+      fail "unsupported git.commit.mode: $COMMIT_MODE"
+      ;;
+  esac
+
+  if [[ "$COMMIT_ALL" == true ]]; then
+    git add -A
+    git diff --cached --quiet && fail "no changes to commit"
+    git commit -m "$COMMIT_MESSAGE"
+  else
+    git add -A -- "${COMMIT_PATHS[@]}"
+
+    if git diff --quiet HEAD -- "${COMMIT_PATHS[@]}"; then
+      fail "selected paths have no changes to commit"
+    fi
+
+    git commit -m "$COMMIT_MESSAGE" -- "${COMMIT_PATHS[@]}"
+  fi
+
+  commit_sha="$(git rev-parse HEAD)"
+  branch="$(current_branch)"
+
+  printf 'commit=%s\n' "$commit_sha"
+  printf 'branch=%s\n' "$branch"
+
+  if [[ "$COMMIT_MODE" == "manual" ]]; then
+    printf 'pushed=false\n'
+    return 0
+  fi
+
+  base_branch="$(workflow_base_branch "$branch")"
+
+  if ! push_branch "$branch" "$base_branch"; then
+    printf 'pushed=false\n'
+    fail "commit was created but push failed"
+  fi
+
+  printf 'pushed=true\n'
+}
+
+push_changes() {
+  local branch
+  local base_branch
+
+  parse_push_args "$@"
+  require_repository
+  load_commit_settings
+
+  case "$COMMIT_MODE" in
+    manual)
+      if [[ "$PUSH_OVERRIDE_MANUAL" != true ]]; then
+        printf 'push=skipped\nreason=manual\n'
+        return 0
+      fi
+      ;;
+    automatic)
+      ;;
+    *)
+      fail "unsupported git.commit.mode: $COMMIT_MODE"
+      ;;
+  esac
+
+  branch="$(current_branch)"
+  base_branch="$(workflow_base_branch "$branch")"
+  push_branch "$branch" "$base_branch"
+
+  printf 'push=true\n'
+  printf 'branch=%s\n' "$branch"
+}
+
+delete_integrated_branch() {
+  local working_branch="$1"
+  local base_branch="$2"
+  local remote
+  local remote_deleted=false
+
+  remote="$(remote_for_branch "$working_branch" "$base_branch")"
+
+  if git ls-remote --exit-code --heads "$remote" "$working_branch" >/dev/null 2>&1; then
+    git push "$remote" --delete "$working_branch"
+    remote_deleted=true
+  fi
+
+  if [[ "$INTEGRATION_MERGE_METHOD" == "squash" ]]; then
+    git branch -D "$working_branch"
+  else
+    git branch -d "$working_branch"
+  fi
+
+  if [[ "$remote_deleted" == true ]]; then
+    printf 'branch_deleted=local-and-remote\n'
+  else
+    printf 'branch_deleted=local\n'
+  fi
+}
+
+integrate_local_merge() {
+  local working_branch="$1"
+  local base_branch="$2"
+  local integration_sha
+  local merge_needed=true
+
+  if [[ "$INTEGRATION_MERGE_METHOD" == "squash" && -z "$INTEGRATION_MESSAGE" ]]; then
+    fail "--message is required when git.integration.mergeMethod is squash"
+  fi
+
+  git checkout "$base_branch" >/dev/null
+  sync_current_branch "$base_branch"
+
+  case "$INTEGRATION_MERGE_METHOD" in
+    mergeCommit)
+      if git merge-base --is-ancestor "$working_branch" HEAD; then
+        merge_needed=false
+      fi
+
+      if [[ "$merge_needed" == true ]]; then
+        if [[ -n "$INTEGRATION_MESSAGE" ]]; then
+          git merge --no-ff -m "$INTEGRATION_MESSAGE" "$working_branch"
+        else
+          git merge --no-ff --no-edit "$working_branch"
+        fi
+      fi
+      ;;
+    squash)
+      if git diff --quiet HEAD "$working_branch"; then
+        merge_needed=false
+      fi
+
+      if [[ "$merge_needed" == true ]]; then
+        git merge --squash "$working_branch"
+        git commit -m "$INTEGRATION_MESSAGE"
+      fi
+      ;;
+    *)
+      fail "unsupported git.integration.mergeMethod: $INTEGRATION_MERGE_METHOD"
+      ;;
+  esac
+
+  integration_sha="$(git rev-parse HEAD)"
+
+  if ! push_branch "$base_branch"; then
+    git checkout "$working_branch" >/dev/null 2>&1 || true
+    fail "integration completed locally but push failed; workflow state was preserved"
+  fi
+
+  printf 'integration=localMerge\n'
+  printf 'base_branch=%s\n' "$base_branch"
+  printf 'working_branch=%s\n' "$working_branch"
+  printf 'merge_method=%s\n' "$INTEGRATION_MERGE_METHOD"
+  printf 'commit=%s\n' "$integration_sha"
+
+  if [[ "$DELETE_AFTER_INTEGRATION" == true ]]; then
+    delete_integrated_branch "$working_branch" "$base_branch"
+    clear_workflow_branch "$working_branch"
+  else
+    clear_workflow_branch "$working_branch"
+    printf 'branch_deleted=false\n'
+  fi
+}
+
+create_pull_request() {
+  local working_branch="$1"
+  local base_branch="$2"
+  local pr_url
+
+  require_command gh
+  [[ -n "$PR_TITLE" ]] || fail "--title is required when git.integration.mode is pullRequest"
+
+  push_branch "$working_branch" "$base_branch"
+  pr_url="$(gh pr view "$working_branch" --json url --jq '.url' 2>/dev/null || true)"
+
+  if [[ -z "$pr_url" ]]; then
+    if [[ -n "$PR_BODY_FILE" ]]; then
+      [[ -f "$PR_BODY_FILE" ]] || fail "pull request body file not found: $PR_BODY_FILE"
+      pr_url="$(gh pr create --base "$base_branch" --head "$working_branch" --title "$PR_TITLE" --body-file "$PR_BODY_FILE")"
+    else
+      pr_url="$(gh pr create --base "$base_branch" --head "$working_branch" --title "$PR_TITLE" --body "$PR_BODY")"
+    fi
+  fi
+
+  printf 'integration=pullRequest\n'
+  printf 'base_branch=%s\n' "$base_branch"
+  printf 'working_branch=%s\n' "$working_branch"
+  printf 'url=%s\n' "$pr_url"
+}
+
+integrate() {
+  local working_branch
+  local base_branch
+  local branch_created
+
+  parse_integration_args "$@"
+  require_repository
+  load_integration_settings
+
+  working_branch="$(current_branch)"
+  base_branch="$(workflow_base_branch "$working_branch")"
+  branch_created="$(workflow_branch_created "$working_branch")"
+
+  if [[ "$branch_created" != true || -z "$base_branch" ]]; then
+    printf 'integration=skipped\nreason=no-workflow-created-branch\n'
+    return 0
+  fi
+
+  if has_local_changes; then
+    fail "working tree must be clean before integration"
+  fi
+
+  case "$INTEGRATION_MODE" in
+    localMerge)
+      integrate_local_merge "$working_branch" "$base_branch"
+      ;;
+    pullRequest)
+      create_pull_request "$working_branch" "$base_branch"
+      ;;
+    *)
+      fail "unsupported git.integration.mode: $INTEGRATION_MODE"
+      ;;
+  esac
 }
 
 main() {
@@ -422,11 +982,21 @@ main() {
       shift
       prepare "$@"
       ;;
-
+    commit)
+      shift
+      commit_changes "$@"
+      ;;
+    push)
+      shift
+      push_changes "$@"
+      ;;
+    integrate)
+      shift
+      integrate "$@"
+      ;;
     -h|--help)
       usage
       ;;
-
     *)
       fail "unknown command: $1"
       ;;
