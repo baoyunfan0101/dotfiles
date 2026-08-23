@@ -1,0 +1,436 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BRANCH_NAME=""
+
+BACKUP_MODE=""
+BACKUP_METHOD=""
+BACKUP_REF="none"
+BACKUP_CREATED=false
+
+SYNC_MODE=""
+SYNC_UPDATE_METHOD=""
+SYNC_RESULT="skipped"
+
+BRANCH_MODE=""
+BASE_BRANCHES_JSON="[]"
+
+ORIGINAL_BRANCH=""
+WORKING_BRANCH=""
+BRANCH_CREATED=false
+
+usage() {
+  cat <<EOF
+Usage:
+  git-workflow prepare [--branch-name NAME]
+
+Commands:
+  prepare
+      Back up selected local changes, synchronize the current branch,
+      select or create the working branch, and reapply the backup.
+
+Options:
+  --branch-name NAME
+      Candidate task branch name. Required only when the configured
+      branch mode requires creating a branch.
+
+  -h, --help
+      Show this help.
+EOF
+}
+
+fail() {
+  echo "git-workflow: $*" >&2
+  exit 1
+}
+
+require_command() {
+  local command_name="$1"
+
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    fail "required command not found: $command_name"
+  fi
+}
+
+setting() {
+  agent-project-settings get "$1"
+}
+
+current_branch() {
+  local branch
+
+  branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+
+  if [[ -z "$branch" ]]; then
+    fail "detached HEAD is not supported"
+  fi
+
+  printf '%s\n' "$branch"
+}
+
+has_tracked_changes() {
+  if ! git diff --quiet -- || ! git diff --cached --quiet --; then
+    return 0
+  fi
+
+  return 1
+}
+
+has_untracked_changes() {
+  local untracked
+
+  untracked="$(git ls-files --others --exclude-standard)"
+  [[ -n "$untracked" ]]
+}
+
+create_stash_backup() {
+  local message
+
+  message="agent-workflow backup $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  case "$BACKUP_MODE" in
+    none)
+      return 0
+      ;;
+
+    tracked)
+      if ! has_tracked_changes; then
+        return 0
+      fi
+
+      git stash push \
+        -m "$message" \
+        >/dev/null
+      ;;
+
+    untracked)
+      local untracked_paths=()
+      local untracked_count=0
+      local path
+
+      while IFS= read -r -d '' path; do
+        untracked_paths+=("$path")
+        ((untracked_count += 1))
+      done < <(
+        git ls-files \
+          --others \
+          --exclude-standard \
+          -z
+      )
+
+      if ((untracked_count == 0)); then
+        return 0
+      fi
+
+      git stash push \
+        -u \
+        -m "$message" \
+        -- "${untracked_paths[@]}" \
+        >/dev/null
+      ;;
+
+    all)
+      if ! has_tracked_changes && ! has_untracked_changes; then
+        return 0
+      fi
+
+      git stash push \
+        -u \
+        -m "$message" \
+        >/dev/null
+      ;;
+
+    *)
+      fail "unsupported git.backup.mode: $BACKUP_MODE"
+      ;;
+  esac
+
+  BACKUP_REF="$(git rev-parse --verify refs/stash)"
+  BACKUP_CREATED=true
+}
+
+create_backup() {
+  if [[ "$BACKUP_MODE" == "none" ]]; then
+    return 0
+  fi
+
+  case "$BACKUP_METHOD" in
+    stash)
+      create_stash_backup
+      ;;
+
+    commit)
+      fail "git.backup.method=commit is not implemented yet"
+      ;;
+
+    *)
+      fail "unsupported git.backup.method: $BACKUP_METHOD"
+      ;;
+  esac
+}
+
+reapply_backup() {
+  if [[ "$BACKUP_CREATED" != true ]]; then
+    return 0
+  fi
+
+  git stash apply \
+    --index \
+    "$BACKUP_REF" \
+    >/dev/null
+}
+
+remote_for_current_branch() {
+  local remote
+
+  remote="$(
+    git config \
+      --get "branch.$ORIGINAL_BRANCH.remote" \
+      || true
+  )"
+
+  if [[ -z "$remote" || "$remote" == "." ]]; then
+    fail "current branch has no remote"
+  fi
+
+  printf '%s\n' "$remote"
+}
+
+sync_repository() {
+  local remote
+  local upstream
+
+  case "$SYNC_MODE" in
+    none)
+      SYNC_RESULT="skipped"
+      ;;
+
+    fetch)
+      remote="$(remote_for_current_branch)"
+
+      git fetch "$remote"
+
+      SYNC_RESULT="fetched"
+      ;;
+
+    update)
+      remote="$(remote_for_current_branch)"
+
+      upstream="$(
+        git rev-parse \
+          --abbrev-ref \
+          --symbolic-full-name \
+          '@{upstream}' \
+          2>/dev/null \
+          || true
+      )"
+
+      if [[ -z "$upstream" ]]; then
+        fail "current branch has no upstream"
+      fi
+
+      git fetch "$remote"
+
+      case "$SYNC_UPDATE_METHOD" in
+        ffOnly)
+          git merge \
+            --ff-only \
+            "$upstream"
+          ;;
+
+        rebase)
+          git rebase "$upstream"
+          ;;
+
+        merge)
+          git merge \
+            --no-edit \
+            "$upstream"
+          ;;
+
+        *)
+          fail "unsupported git.sync.updateMethod: $SYNC_UPDATE_METHOD"
+          ;;
+      esac
+
+      SYNC_RESULT="updated"
+      ;;
+
+    *)
+      fail "unsupported git.sync.mode: $SYNC_MODE"
+      ;;
+  esac
+}
+
+is_base_branch() {
+  local branch="$1"
+
+  python3 \
+    - "$branch" "$BASE_BRANCHES_JSON" \
+    <<'PY'
+import json
+import sys
+
+branch = sys.argv[1]
+base_branches = json.loads(sys.argv[2])
+
+raise SystemExit(0 if branch in base_branches else 1)
+PY
+}
+
+create_task_branch() {
+  if [[ -z "$BRANCH_NAME" ]]; then
+    fail "--branch-name is required by the configured branch mode"
+  fi
+
+  if ! git check-ref-format \
+    --branch "$BRANCH_NAME" \
+    >/dev/null 2>&1; then
+    fail "invalid branch name: $BRANCH_NAME"
+  fi
+
+  if git show-ref \
+    --verify \
+    --quiet \
+    "refs/heads/$BRANCH_NAME"; then
+    fail "branch already exists: $BRANCH_NAME"
+  fi
+
+  git checkout \
+    -b "$BRANCH_NAME" \
+    >/dev/null
+
+  BRANCH_CREATED=true
+}
+
+select_working_branch() {
+  case "$BRANCH_MODE" in
+    current)
+      ;;
+
+    alwaysCreate)
+      create_task_branch
+      ;;
+
+    fromBase)
+      if is_base_branch "$ORIGINAL_BRANCH"; then
+        create_task_branch
+      fi
+      ;;
+
+    *)
+      fail "unsupported git.branch.mode: $BRANCH_MODE"
+      ;;
+  esac
+}
+
+parse_prepare_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --branch-name)
+        if [[ $# -lt 2 ]]; then
+          fail "missing value for --branch-name"
+        fi
+
+        BRANCH_NAME="$2"
+        shift 2
+        ;;
+
+      --branch-name=*)
+        BRANCH_NAME="${1#*=}"
+        shift
+        ;;
+
+      -h|--help)
+        usage
+        exit 0
+        ;;
+
+      *)
+        fail "unknown option: $1"
+        ;;
+    esac
+  done
+}
+
+load_settings() {
+  agent-project-settings effective >/dev/null
+
+  BACKUP_MODE="$(setting git.backup.mode)"
+  BACKUP_METHOD="$(setting git.backup.method)"
+
+  SYNC_MODE="$(setting git.sync.mode)"
+  SYNC_UPDATE_METHOD="$(setting git.sync.updateMethod)"
+
+  BRANCH_MODE="$(setting git.branch.mode)"
+  BASE_BRANCHES_JSON="$(setting git.branch.baseBranches)"
+}
+
+print_result() {
+  printf 'backup_mode=%s\n' "$BACKUP_MODE"
+  printf 'backup_method=%s\n' "$BACKUP_METHOD"
+  printf 'backup_ref=%s\n' "$BACKUP_REF"
+
+  printf 'sync_mode=%s\n' "$SYNC_MODE"
+  printf 'sync_result=%s\n' "$SYNC_RESULT"
+
+  printf 'branch=%s\n' "$WORKING_BRANCH"
+  printf 'branch_created=%s\n' "$BRANCH_CREATED"
+  printf 'base_branch=%s\n' "$ORIGINAL_BRANCH"
+}
+
+prepare() {
+  parse_prepare_args "$@"
+
+  require_command git
+  require_command python3
+  require_command agent-project-settings
+
+  if ! git rev-parse \
+    --is-inside-work-tree \
+    >/dev/null 2>&1; then
+    fail "current directory is not inside a Git worktree"
+  fi
+
+  ORIGINAL_BRANCH="$(current_branch)"
+
+  # Load every setting before backup mutates the working tree.
+  load_settings
+
+  if [[ "$BACKUP_MODE" != "none" && "$BACKUP_METHOD" == "commit" ]]; then
+    fail "git.backup.method=commit is not implemented yet"
+  fi
+
+  create_backup
+  sync_repository
+  select_working_branch
+  reapply_backup
+
+  WORKING_BRANCH="$(current_branch)"
+
+  print_result
+}
+
+main() {
+  if [[ $# -eq 0 ]]; then
+    usage >&2
+    exit 1
+  fi
+
+  case "$1" in
+    prepare)
+      shift
+      prepare "$@"
+      ;;
+
+    -h|--help)
+      usage
+      ;;
+
+    *)
+      fail "unknown command: $1"
+      ;;
+  esac
+}
+
+main "$@"

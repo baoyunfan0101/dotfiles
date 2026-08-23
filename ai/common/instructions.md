@@ -19,82 +19,21 @@
 
 ## Git workflow
 
-### Project settings
-
-- At the start of each task, run:
-
-  ```bash
-  agent-project-settings effective
-  ```
-
-- Use the returned settings for all Git workflow decisions.
-- If project settings cannot be read or validated, report the failure and do not perform automatic Git mutations.
-
 ### Startup
 
-Run the startup workflow in this order:
+At the start of each task, generate a candidate task branch name and run:
 
-1. Back up existing local changes according to `git.backup`.
-2. Synchronize with the remote according to `git.sync`.
-3. Select or create the working branch according to `git.branch`.
-4. Reapply any stash created during backup.
-
-### Backup
-
-`git.backup.mode` controls which pre-existing local changes are backed up:
-
-- `none`: do not create a backup.
-- `tracked`: back up staged and unstaged tracked changes.
-- `untracked`: back up untracked files only.
-- `all`: back up tracked changes and untracked files.
-
-`git.backup.method` controls how the backup is created:
-
-- `stash`: create a Git stash containing only the changes selected by `git.backup.mode`. Keep the stash after reapplying it so it remains a backup.
-- `commit`: create a local backup commit containing only the changes selected by `git.backup.mode`.
-
-Do not include ignored files unless explicitly requested.
-
-Report backup events when they happen:
-
-```text
-[backup] INFO create: mode=<backup-mode> method=<backup-method> ref=<backup-ref>
-[backup] INFO reapply: ref=<backup-ref>
-[backup] ERROR create: output="<command-output>"
-[backup] ERROR reapply: output="<command-output>"
+```bash
+git-workflow prepare --branch-name <branch-name>
 ```
 
-### Sync
+Do not manually reproduce the backup, synchronization, or branch-selection steps handled by `git-workflow prepare`.
 
-`git.sync.mode` controls remote synchronization:
+If preparation fails, report the failure and do not make project changes until the failure is resolved.
 
-- `none`: do not contact the remote.
-- `fetch`: fetch remote updates without changing the current branch.
-- `update`: fetch remote updates and update the current branch using `git.sync.updateMethod`.
+### Branch naming
 
-`git.sync.updateMethod` controls how `update` is performed:
-
-- `ffOnly`: allow only a fast-forward update.
-- `rebase`: rebase local commits onto the remote branch.
-- `merge`: merge the remote branch into the current branch.
-
-Do not automatically resolve synchronization conflicts.
-
-Report sync events when they happen:
-
-```text
-[sync] INFO fetch: remote=<remote-name>
-[sync] INFO update: branch=<branch-name> method=<update-method>
-[sync] ERROR update: output="<command-output>"
-```
-
-### Branch
-
-`git.branch.mode` controls branch selection:
-
-- `current`: always continue on the current branch.
-- `alwaysCreate`: create a new task branch.
-- `fromBase`: create a new task branch only when the current branch is listed in `git.branch.baseBranches`; otherwise continue on the current branch.
+The branch name passed to `git-workflow prepare` is only a candidate. The workflow decides from project settings whether a new branch is actually required.
 
 Follow the repository's existing branch naming style when available. Otherwise use:
 
@@ -110,7 +49,7 @@ feat, fix, chore, docs, refactor, test, ci, build, perf, style, revert, hotfix
 
 Use a concrete touched directory or module as `area`.
 
-Report branch events when they happen:
+Report branch events returned by the workflow when they happen:
 
 ```text
 [branch] INFO create: name=<branch-name> base=<base-branch>
@@ -119,6 +58,12 @@ Report branch events when they happen:
 ```
 
 ### Commit
+
+Before making automatic commit or push decisions, read:
+
+```bash
+agent-project-settings get git.commit.mode
+```
 
 `git.commit.mode` controls automatic commits:
 
@@ -143,12 +88,20 @@ Report commit events when they happen:
 
 ### Integration
 
-When finishing a task branch, use `git.integration.mode`.
+When finishing a task branch, read:
+
+```bash
+agent-project-settings get git.integration.mode
+agent-project-settings get git.integration.mergeMethod
+agent-project-settings get git.branch.deleteAfterIntegration
+```
+
+`git.integration.mode` controls integration:
 
 - `localMerge`: integrate locally into the branch from which the task branch was created.
 - `pullRequest`: create a pull request targeting that branch.
 
-For `localMerge`, use `git.integration.mergeMethod`:
+For `localMerge`, `git.integration.mergeMethod` controls the merge:
 
 - `mergeCommit`: create a merge commit.
 - `squash`: squash the task branch into one commit.
