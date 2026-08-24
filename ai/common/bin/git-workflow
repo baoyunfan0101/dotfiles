@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 BRANCH_NAME=""
 
@@ -106,6 +106,16 @@ fail() {
   printf '[git] %s error reason="%s"\n' "$CURRENT_ACTION" "$*" >&2
   exit 1
 }
+
+handle_error() {
+  local status="$1"
+
+  trap - ERR
+  printf '[git] %s error status=%s\n' "$CURRENT_ACTION" "$status" >&2
+  exit "$status"
+}
+
+trap 'handle_error "$?"' ERR
 
 require_command() {
   local command_name="$1"
