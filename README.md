@@ -9,6 +9,7 @@ dotfiles/
 ├── README.md
 ├── .gitignore
 └── ai/
+    ├── project-settings.md
     ├── install.sh
     ├── install/
     │   └── lib.sh
@@ -87,10 +88,20 @@ The `common` module installs:
 ~/.config/agent-workflow/instructions.md
 ```
 
-`agent-project-settings` reads project-level workflow configuration from:
+`git-workflow` provides the shared Git workflow used by supported agents.
+
+Project-level workflow behavior can be configured in:
 
 ```text
 <repository>/.ai/project.json
 ```
 
-`git-workflow` provides the shared Git workflow used by supported agents.
+`agent-project-settings` reads this configuration and merges it with the built-in defaults.
+
+Show the effective project settings with:
+
+```bash
+agent-project-settings effective
+```
+
+See [Project Settings](ai/project-settings.md) for all supported settings, values, defaults, and behavior.
