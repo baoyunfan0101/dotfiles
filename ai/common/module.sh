@@ -9,5 +9,9 @@ module_path \
   "$HOME/.local/bin/git-workflow"
 
 module_path \
+  "bin/agent-doctor" \
+  "$HOME/.local/bin/agent-doctor"
+
+module_path \
   "instructions.md" \
   "$COMMON_CONFIG_DIR/instructions.md"
