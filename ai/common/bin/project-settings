@@ -29,6 +29,10 @@ DEFAULT_SETTINGS = {
         "integration": {
             "mode": "localMerge",
             "mergeMethod": "mergeCommit",
+            "pullRequest": {
+                "autoMerge": False,
+                "mergeMethod": "squash",
+            },
         },
     },
 }
@@ -55,6 +59,10 @@ SCHEMA = {
         "integration": {
             "mode": str,
             "mergeMethod": str,
+            "pullRequest": {
+                "autoMerge": bool,
+                "mergeMethod": str,
+            },
         },
     },
 }
@@ -68,6 +76,7 @@ ALLOWED_VALUES = {
     "git.branch.mode": {"current", "alwaysCreate", "fromBase"},
     "git.integration.mode": {"localMerge", "pullRequest"},
     "git.integration.mergeMethod": {"squash", "mergeCommit"},
+    "git.integration.pullRequest.mergeMethod": {"merge", "squash", "rebase"},
 }
 
 
