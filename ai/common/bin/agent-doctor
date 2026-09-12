@@ -63,7 +63,7 @@ command_fix() {
         printf 'install GitHub CLI from https://cli.github.com/'
       fi
       ;;
-    agent-project-settings|git-workflow)
+    agent-project-settings|git-workflow|github-pr)
       printf 'reinstall the dotfiles AI common module'
       ;;
     *)
@@ -196,6 +196,8 @@ if [[ "$sync_mode" == "update" && -n "$branch" ]]; then
 fi
 
 if [[ "$integration_mode" == "pullRequest" ]]; then
+  check_command github-pr git.integration.mode:pullRequest || true
+
   if check_command gh git.integration.mode:pullRequest; then
     if gh auth status >/dev/null 2>&1; then
       ok gh-auth
