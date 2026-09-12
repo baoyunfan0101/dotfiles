@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+doctor_error() {
+  local name="$1"
+  local reason="$2"
+  local required_by="$3"
+  local fix="$4"
+
+  printf '[doctor] check error name=%s reason="%s"\n' "$name" "$reason" >&2
+  printf '[doctor] required-by=%s\n' "$required_by" >&2
+  printf '[doctor] fix="%s"\n' "$fix" >&2
+  exit 1
+}
+
+require_command() {
+  local name="$1"
+  local required_by="$2"
+  local fix="$3"
+
+  if ! command -v "$name" >/dev/null 2>&1; then
+    doctor_error "$name" "command not found" "$required_by" "$fix"
+  fi
+}
+
+require_command git core "install git and ensure it is on PATH"
+require_command python3 core "install python3 and ensure it is on PATH"
+require_command agent-project-settings core "re-run the dotfiles AI installer"
+require_command git-workflow core "re-run the dotfiles AI installer"
+
+if ! integration_mode="$(agent-project-settings get git.integration.mode 2>/dev/null)"; then
+  doctor_error \
+    project-settings \
+    "configuration invalid" \
+    core \
+    "fix .ai/project.json and run agent-project-settings effective"
+fi
+
+case "$integration_mode" in
+  localMerge)
+    ;;
+  pullRequest)
+    require_command gh "git.integration.mode:pullRequest" \
+      "install gh and ensure it is on PATH"
+
+    if ! gh auth status >/dev/null 2>&1; then
+      doctor_error \
+        gh-auth \
+        "authentication failed" \
+        "git.integration.mode:pullRequest" \
+        "run gh auth login"
+    fi
+    ;;
+  *)
+    doctor_error \
+      project-settings \
+      "unsupported integration mode" \
+      core \
+      "fix git.integration.mode in .ai/project.json"
+    ;;
+esac
+
+printf '[doctor] ready\n'
