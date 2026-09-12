@@ -48,74 +48,149 @@ Settings in this file override the built-in defaults. Any omitted settings inher
 
 ### `schemaVersion`
 
-Configuration schema version. The only supported value is currently `1`.
+Configuration schema version.
+
+Default:
+
+```json
+1
+```
+
+Supported values:
+
+| Value | Meaning |
+|---|---|
+| `1` | Current project settings schema. |
+
+The field is required when `.ai/project.json` exists.
 
 ## Git synchronization
 
 ### `git.sync.mode`
 
-Controls synchronization during workflow preparation.
+Controls how the current branch is synchronized during workflow preparation.
+
+Default:
+
+```json
+"update"
+```
+
+Supported values:
 
 | Value | Meaning |
 |---|---|
-| `"none"` | Do not contact the remote repository. |
-| `"fetch"` | Fetch without modifying the current branch. |
-| `"update"` | Fetch and update the current branch from its upstream. |
-
-Default: `"update"`.
+| `"none"` | Do not contact or synchronize with the remote repository. |
+| `"fetch"` | Fetch from the remote without modifying the current branch. |
+| `"update"` | Fetch from the remote and update the current branch from its upstream according to `git.sync.updateMethod`. |
 
 When `"update"` is used, the current branch must have an upstream branch.
 
 ### `git.sync.updateMethod`
 
-Controls how `git.sync.mode = "update"` updates the current branch.
+Controls how the current branch is updated from its upstream when:
+
+```json
+"git.sync.mode": "update"
+```
+
+Default:
+
+```json
+"ffOnly"
+```
+
+Supported values:
 
 | Value | Meaning |
 |---|---|
-| `"ffOnly"` | Require a fast-forward update. |
+| `"ffOnly"` | Update only when a fast-forward merge is possible. The workflow fails if the local and upstream histories have diverged. |
 | `"rebase"` | Rebase local commits onto the upstream branch. |
 | `"merge"` | Merge the upstream branch into the current branch. |
 
-Default: `"ffOnly"`.
+This setting has no effect when `git.sync.mode` is `"none"` or `"fetch"`.
 
 ## Git backup
 
-Before synchronization or branch selection, `git-workflow prepare` can preserve local changes and restore them afterward.
+Before synchronization or branch selection, `git-workflow prepare` can preserve local changes and then restore them afterward.
 
 ### `git.backup.mode`
+
+Controls which local changes are included in the backup.
+
+Default:
+
+```json
+"all"
+```
+
+Supported values:
 
 | Value | Meaning |
 |---|---|
 | `"none"` | Do not create a backup. |
 | `"tracked"` | Back up modifications to tracked files. |
 | `"untracked"` | Back up untracked files. |
-| `"all"` | Back up tracked and untracked changes. |
-
-Default: `"all"`.
+| `"all"` | Back up both tracked changes and untracked files. |
 
 Ignored files are not included as untracked files.
 
 ### `git.backup.method`
 
+Controls how the selected local changes are preserved.
+
+Default:
+
+```json
+"stash"
+```
+
+Supported values:
+
 | Value | Meaning |
 |---|---|
-| `"stash"` | Store the backup as a Git stash. |
-| `"commit"` | Store the backup under `refs/agent-workflow/backups/`; use a temporary stash only for transport. |
+| `"stash"` | Store the backup as a Git stash. The backup stash remains available after the changes are reapplied. |
+| `"commit"` | Store the backup as a commit referenced under `refs/agent-workflow/backups/`. A temporary stash is used only to transport the working-tree changes while the workflow prepares the repository. |
 
-Default: `"stash"`.
+This setting has no effect when:
 
-This setting has no effect when `git.backup.mode = "none"`.
+```json
+"git.backup.mode": "none"
+```
 
 ## Git commits
 
 ### `git.commit.mode`
 
+Controls whether the agent workflow automatically commits and pushes completed changes.
+
+Default:
+
+```json
+"automatic"
+```
+
+Supported values:
+
 | Value | Meaning |
 |---|---|
-| `"manual"` | Normal workflow-driven commit and push operations are skipped. Explicit requests may use `--override-manual`. |
-| `"automatic"` | Workflow commits are created normally and automatically pushed. |
+| `"manual"` | Normal workflow-driven commit and push operations are skipped. Explicitly requested commits or pushes can still be performed with the workflow's manual override. |
+| `"automatic"` | Workflow commits are created normally, and each successful workflow commit is automatically pushed. |
 
-Default: `"automatic"`.
+In `"manual"` mode, an explicitly requested commit can be performed with:
+
+```bash
+git-workflow commit \
+  --override-manual \
+  --message "<message>" \
+  -- <paths>...
+```
+
+An explicitly requested push can be performed with:
+
+```bash
+git-workflow push --override-manual
+```
 
 A manually overridden commit is not automatically pushed.
 
@@ -123,19 +198,33 @@ A manually overridden commit is not automatically pushed.
 
 ### `git.branch.mode`
 
+Controls whether workflow preparation creates a task branch.
+
+Default:
+
+```json
+"fromBase"
+```
+
+Supported values:
+
 | Value | Meaning |
 |---|---|
-| `"current"` | Continue on the current branch. |
-| `"alwaysCreate"` | Always create a new task branch during preparation. |
-| `"fromBase"` | Create a task branch only when the current branch is listed in `git.branch.baseBranches`. |
+| `"current"` | Continue working on the current branch. Never create a task branch automatically. |
+| `"alwaysCreate"` | Always create a new task branch during workflow preparation. |
+| `"fromBase"` | Create a new task branch only when the current branch is listed in `git.branch.baseBranches`. Otherwise continue on the current branch. |
 
-Default: `"fromBase"`.
+When the selected mode requires a new branch, `git-workflow prepare` must receive a candidate branch name:
 
-When the selected mode requires a branch, `git-workflow prepare` must receive `--branch-name <candidate-branch>`.
+```bash
+git-workflow prepare --branch-name <candidate-branch>
+```
+
+Branches created by the workflow are marked with Git configuration metadata so that they can later be recognized and integrated by `git-workflow integrate`.
 
 ### `git.branch.baseBranches`
 
-Defines branches treated as base branches by `"fromBase"` mode.
+Defines the branches treated as base branches by `"fromBase"` mode.
 
 Default:
 
@@ -143,63 +232,160 @@ Default:
 ["main"]
 ```
 
-Entries must be unique, non-empty strings. The list cannot be empty when `git.branch.mode = "fromBase"`.
+Example:
+
+```json
+["main", "develop"]
+```
+
+Each entry must be a unique, non-empty string.
+
+When:
+
+```json
+"git.branch.mode": "fromBase"
+```
+
+the list must not be empty.
+
+This setting primarily affects `git.branch.mode = "fromBase"`.
 
 ### `git.branch.deleteAfterIntegration`
 
 Controls whether a workflow-created task branch is deleted after successful local integration.
 
-Default: `false`.
+Default:
 
-This setting currently applies only to `git.integration.mode = "localMerge"`. Pull-request integration may complete asynchronously, so branch cleanup must not be treated as complete when auto-merge is merely enabled.
+```json
+false
+```
+
+Supported values:
+
+| Value | Meaning |
+|---|---|
+| `false` | Keep the task branch after integration. |
+| `true` | Delete the integrated task branch locally and delete its remote branch when the remote branch exists. |
+
+This setting applies to:
+
+```json
+"git.integration.mode": "localMerge"
+```
+
+Pull-request integration may finish asynchronously, so enabling PR auto-merge does not by itself mean branch cleanup is safe.
+
+When squash integration is used, the local task branch is force-deleted because its commits are not direct ancestors of the resulting squash commit.
 
 ## Git integration
 
-Only branches created and marked by the workflow are automatically integrated. The working tree must be clean before integration.
+Only branches created and marked by the workflow are automatically integrated.
+
+If the current branch was not created by `git-workflow prepare`, `git-workflow integrate` skips integration.
+
+The working tree must be clean before integration.
 
 ### `git.integration.mode`
 
+Controls how a workflow-created task branch is integrated.
+
+Default:
+
+```json
+"localMerge"
+```
+
+Supported values:
+
 | Value | Meaning |
 |---|---|
-| `"localMerge"` | Integrate locally into the original base branch and push it. |
-| `"pullRequest"` | Push the task branch and create or reuse a GitHub pull request. |
+| `"localMerge"` | Check out the original base branch, synchronize it, integrate the task branch locally, and push the resulting base branch. |
+| `"pullRequest"` | Push the task branch and create or reuse a GitHub pull request targeting the original base branch. |
 
-Default: `"localMerge"`.
+`"pullRequest"` mode requires the GitHub CLI (`gh`). `agent-doctor` also verifies authentication and repository detection before work begins.
 
-`"pullRequest"` requires GitHub CLI (`gh`) and authenticated GitHub access. `agent-doctor` checks these requirements before work begins.
+A pull request title must be supplied to `git-workflow integrate`.
+
+Example:
+
+```bash
+git-workflow integrate \
+  --title "Add project settings documentation" \
+  --body "Document all supported project settings."
+```
 
 ### `git.integration.mergeMethod`
 
-Controls local integration only.
+Controls how a task branch is integrated when:
+
+```json
+"git.integration.mode": "localMerge"
+```
+
+Default:
+
+```json
+"mergeCommit"
+```
+
+Supported values:
 
 | Value | Meaning |
 |---|---|
-| `"mergeCommit"` | Merge using a merge commit. |
-| `"squash"` | Squash the task branch into one commit. |
+| `"mergeCommit"` | Merge the task branch using a merge commit. Fast-forward-only integration is not used. |
+| `"squash"` | Squash all changes from the task branch into a single commit on the base branch. |
 
-Default: `"mergeCommit"`.
+For `"mergeCommit"`, an integration message is optional. If omitted, Git generates the normal merge commit message.
 
-This setting does not control GitHub pull-request merge strategy.
+Example:
+
+```bash
+git-workflow integrate \
+  --message "Merge project settings documentation"
+```
+
+For `"squash"`, an integration message is required because the workflow must create the resulting squash commit.
+
+Example:
+
+```bash
+git-workflow integrate \
+  --message "docs(ai): document project settings"
+```
+
+This setting does not control how a GitHub pull request is ultimately merged when `git.integration.mode` is `"pullRequest"`.
 
 ### `git.integration.pullRequest.autoMerge`
 
-Controls whether the workflow requests GitHub auto-merge after a pull request has been created or reused.
+Controls whether GitHub auto-merge is requested for a pull request after `git-workflow integrate` creates or reuses it.
 
-Default: `false`.
+Default:
 
-When set to `true`, the repository must have GitHub auto-merge enabled. The workflow does not decide that a pull request is safe to merge; GitHub branch protection and required checks remain the quality gate.
+```json
+false
+```
 
-The shared workflow runs:
+When enabled, run:
 
 ```bash
 github-pr auto-merge
 ```
 
-after `git-workflow integrate`. When this setting is `false`, the helper returns a stable skip result without modifying the pull request.
+The helper does not decide whether the code is safe to merge. It asks GitHub to auto-merge according to repository protection and required checks. The repository must have GitHub auto-merge enabled; `agent-doctor` reports this before work begins.
+
+When disabled, `github-pr auto-merge` emits a stable skip result and performs no mutation.
 
 ### `git.integration.pullRequest.mergeMethod`
 
 Controls the merge method requested from GitHub when pull-request auto-merge is enabled.
+
+Default:
+
+```json
+"squash"
+```
+
+Supported values:
 
 | Value | Meaning |
 |---|---|
@@ -207,37 +393,45 @@ Controls the merge method requested from GitHub when pull-request auto-merge is 
 | `"squash"` | Squash merge. |
 | `"rebase"` | Rebase merge. |
 
-Default: `"squash"`.
+This setting is independent from `git.integration.mergeMethod` because local merge behavior and GitHub PR merge behavior are separate mechanisms.
 
-This setting is intentionally separate from `git.integration.mergeMethod` because local integration and GitHub pull-request integration are different mechanisms.
+## Preflight
 
-## Preflight and PR status
-
-Run the workflow preflight before starting work:
+Before starting workflow mutations, run:
 
 ```bash
 agent-doctor
 ```
 
-A successful default run emits only:
+The default successful output is intentionally compact:
 
 ```text
 [doctor] ready
 ```
 
-Use `agent-doctor --verbose` to see successful individual checks. Failures include a stable check name, the setting that requires it, and a suggested fix.
+Use:
 
-For compact pull-request state, use:
+```bash
+agent-doctor --verbose
+```
+
+to show successful individual checks. Failures include the failed check, the setting or workflow capability requiring it, and fix guidance.
+
+The doctor only checks dependencies needed by the effective project settings. For example, `gh` is not required for `git.integration.mode = "localMerge"`.
+
+## Pull-request status
+
+Use:
 
 ```bash
 github-pr status
 ```
 
-instead of manually querying and interpreting multiple GitHub CLI commands.
+to get compact PR state instead of making the agent run and interpret multiple GitHub CLI probes.
 
 ## Inspecting effective settings
 
-Show the complete configuration after project overrides have been merged with defaults:
+Show the complete configuration after project overrides have been merged with the defaults:
 
 ```bash
 agent-project-settings effective
@@ -248,3 +442,11 @@ Show one setting:
 ```bash
 agent-project-settings get git.branch.mode
 ```
+
+For example:
+
+```bash
+agent-project-settings get git.backup.mode
+```
+
+prints the effective value of `git.backup.mode`.
