@@ -7,27 +7,25 @@
 - Use ASCII unless explicitly requested otherwise.
 - When showing Markdown containing fenced code blocks, use `~~~md` as the outer fence.
 
-## Git
+## Workflow
 
-Use `git-workflow` for all Git workflow operations; do not reproduce its Git operations manually.
+Run `agent-doctor` before starting work. If it fails, surface its output and stop the automatic workflow.
 
-Start each task with:
+Use `git-workflow` for Git operations; do not reproduce its behavior manually.
+
+Prepare with:
 
 ```bash
 git-workflow prepare --branch-name <candidate-branch>
 ```
 
-Commit each atomic change with:
+Commit each atomic change by path with:
 
 ```bash
 git-workflow commit --message "<message>" -- <paths>...
 ```
 
-Use `--all` only when all current changes belong to the same atomic commit.
-
-When the user explicitly requests a commit or push disabled by manual mode, use `--override-manual`.
-
-Finish a workflow-created task branch with:
+Finish a workflow-created branch with:
 
 ```bash
 git-workflow integrate \
@@ -36,11 +34,13 @@ git-workflow integrate \
   --body "<body>"
 ```
 
-Follow repository naming conventions when available; otherwise use:
+Use `--all` only for one atomic change. Use `--override-manual` only for an explicit user request blocked by manual mode.
+
+Follow repository naming conventions, or default to:
 
 ```text
 branch: <type>/<area>-<description>
 commit: <type>(<area>): <summary>
 ```
 
-Surface every `[git]` result from `git-workflow` verbatim exactly once. Do not summarize or repeat it.
+Surface each `[doctor]` and `[git]` result verbatim exactly once.
