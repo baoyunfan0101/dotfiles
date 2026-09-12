@@ -9,7 +9,15 @@
 
 ## Git
 
-Use `git-workflow` for all Git workflow operations; do not reproduce its Git operations manually.
+Use the deterministic workflow tools for Git and environment operations; do not reproduce their checks or Git operations manually.
+
+Before starting a task, run:
+
+```bash
+agent-doctor
+```
+
+Surface every `[doctor]` result verbatim exactly once. If the doctor is not ready, stop automatic Git mutations and surface its fix guidance.
 
 Start each task with:
 
@@ -36,6 +44,16 @@ git-workflow integrate \
   --body "<body>"
 ```
 
+When pull-request integration is configured, then run:
+
+```bash
+github-pr auto-merge
+```
+
+This command is a no-op when pull-request auto-merge is disabled.
+
+Use `github-pr status` when compact pull-request status is needed instead of manually querying GitHub state.
+
 Follow repository naming conventions when available; otherwise use:
 
 ```text
@@ -43,4 +61,4 @@ branch: <type>/<area>-<description>
 commit: <type>(<area>): <summary>
 ```
 
-Surface every `[git]` result from `git-workflow` verbatim exactly once. Do not summarize or repeat it.
+Surface every `[git]` and `[pr]` result verbatim exactly once. Do not summarize or repeat it.
