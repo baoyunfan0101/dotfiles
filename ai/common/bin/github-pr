@@ -6,11 +6,15 @@ CURRENT_ACTION="pr"
 usage() {
   cat <<'EOF'
 Usage:
-  github-pr integrate --branch BRANCH --base BASE --title TITLE [--body BODY | --body-file FILE]
+  github-pr auto-merge [--branch BRANCH]
   github-pr status [--branch BRANCH]
 
-The integrate command creates or reuses a pull request and, when configured,
-enables GitHub auto-merge. The status command emits a compact PR state.
+Commands:
+  auto-merge
+      Enable GitHub auto-merge for the existing pull request when configured.
+
+  status
+      Emit a compact pull-request state for the selected branch.
 EOF
 }
 
@@ -27,72 +31,77 @@ setting() {
   agent-project-settings get "$1"
 }
 
-integrate() {
-  CURRENT_ACTION="integrate"
+selected_branch() {
+  local branch="$1"
+
+  if [[ -n "$branch" ]]; then
+    printf '%s\n' "$branch"
+    return 0
+  fi
+
+  branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+  [[ -n "$branch" ]] || fail "cannot determine branch"
+  printf '%s\n' "$branch"
+}
+
+auto_merge() {
+  CURRENT_ACTION="auto-merge"
   local branch=""
-  local base=""
-  local title=""
-  local body=""
-  local body_file=""
-  local pr_url
-  local auto_merge
+  local enabled
   local merge_method
+  local url
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --branch)
         [[ $# -ge 2 ]] || fail "missing value for --branch"
-        branch="$2"; shift 2 ;;
-      --base)
-        [[ $# -ge 2 ]] || fail "missing value for --base"
-        base="$2"; shift 2 ;;
-      --title)
-        [[ $# -ge 2 ]] || fail "missing value for --title"
-        title="$2"; shift 2 ;;
-      --body)
-        [[ $# -ge 2 ]] || fail "missing value for --body"
-        body="$2"; shift 2 ;;
-      --body-file)
-        [[ $# -ge 2 ]] || fail "missing value for --body-file"
-        body_file="$2"; shift 2 ;;
-      *) fail "unknown option: $1" ;;
+        branch="$2"
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        return 0
+        ;;
+      *)
+        fail "unknown option: $1"
+        ;;
     esac
   done
 
-  [[ -n "$branch" ]] || fail "--branch is required"
-  [[ -n "$base" ]] || fail "--base is required"
-  [[ -n "$title" ]] || fail "--title is required"
-  [[ -z "$body" || -z "$body_file" ]] || fail "--body and --body-file cannot be used together"
-
+  require_command git
   require_command gh
   require_command agent-project-settings
 
+  enabled="$(setting git.integration.pullRequest.autoMerge)"
+  if [[ "$enabled" != "true" ]]; then
+    printf '[pr] auto-merge skip reason=disabled\n'
+    return 0
+  fi
+
+  branch="$(selected_branch "$branch")"
+  merge_method="$(setting git.integration.pullRequest.mergeMethod)"
   gh auth status >/dev/null 2>&1 || fail "GitHub CLI is not authenticated"
 
-  pr_url="$(gh pr view "$branch" --json url --jq '.url' 2>/dev/null || true)"
-  if [[ -z "$pr_url" ]]; then
-    if [[ -n "$body_file" ]]; then
-      [[ -f "$body_file" ]] || fail "pull request body file not found: $body_file"
-      pr_url="$(gh pr create --base "$base" --head "$branch" --title "$title" --body-file "$body_file")"
-    else
-      pr_url="$(gh pr create --base "$base" --head "$branch" --title "$title" --body "$body")"
-    fi
-  fi
+  url="$(gh pr view "$branch" --json url --jq '.url' 2>/dev/null || true)"
+  [[ -n "$url" ]] || fail "pull request not found for branch: $branch"
 
-  auto_merge="$(setting git.integration.pullRequest.autoMerge)"
-  merge_method="$(setting git.integration.pullRequest.mergeMethod)"
+  case "$merge_method" in
+    merge)
+      gh pr merge "$branch" --auto --merge >/dev/null
+      ;;
+    squash)
+      gh pr merge "$branch" --auto --squash >/dev/null
+      ;;
+    rebase)
+      gh pr merge "$branch" --auto --rebase >/dev/null
+      ;;
+    *)
+      fail "unsupported pull request merge method: $merge_method"
+      ;;
+  esac
 
-  if [[ "$auto_merge" == "true" ]]; then
-    case "$merge_method" in
-      merge) gh pr merge "$branch" --auto --merge >/dev/null ;;
-      squash) gh pr merge "$branch" --auto --squash >/dev/null ;;
-      rebase) gh pr merge "$branch" --auto --rebase >/dev/null ;;
-      *) fail "unsupported pull request merge method: $merge_method" ;;
-    esac
-  fi
-
-  printf '[pr] integrate ok branch=%s base=%s autoMerge=%s method=%s url=%s\n' \
-    "$branch" "$base" "$auto_merge" "$merge_method" "$pr_url"
+  printf '[pr] auto-merge ok branch=%s method=%s url=%s\n' \
+    "$branch" "$merge_method" "$url"
 }
 
 status() {
@@ -104,17 +113,23 @@ status() {
     case "$1" in
       --branch)
         [[ $# -ge 2 ]] || fail "missing value for --branch"
-        branch="$2"; shift 2 ;;
-      *) fail "unknown option: $1" ;;
+        branch="$2"
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        return 0
+        ;;
+      *)
+        fail "unknown option: $1"
+        ;;
     esac
   done
 
+  require_command git
   require_command gh
-  if [[ -z "$branch" ]]; then
-    branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
-  fi
-  [[ -n "$branch" ]] || fail "cannot determine branch"
 
+  branch="$(selected_branch "$branch")"
   result="$(gh pr view "$branch" --json number,url,state,mergeStateStatus,isDraft --jq '[.number,.state,.mergeStateStatus,.isDraft,.url] | @tsv' 2>/dev/null || true)"
   [[ -n "$result" ]] || fail "pull request not found for branch: $branch"
 
@@ -125,11 +140,22 @@ status() {
 
 main() {
   [[ $# -gt 0 ]] || { usage >&2; exit 1; }
+
   case "$1" in
-    integrate) shift; integrate "$@" ;;
-    status) shift; status "$@" ;;
-    -h|--help) usage ;;
-    *) fail "unknown command: $1" ;;
+    auto-merge)
+      shift
+      auto_merge "$@"
+      ;;
+    status)
+      shift
+      status "$@"
+      ;;
+    -h|--help)
+      usage
+      ;;
+    *)
+      fail "unknown command: $1"
+      ;;
   esac
 }
 
