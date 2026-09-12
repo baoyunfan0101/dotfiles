@@ -13,5 +13,9 @@ module_path \
   "$HOME/.local/bin/agent-doctor"
 
 module_path \
+  "bin/github-pr" \
+  "$HOME/.local/bin/github-pr"
+
+module_path \
   "instructions.md" \
   "$COMMON_CONFIG_DIR/instructions.md"
