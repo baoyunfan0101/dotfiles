@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+set -u
+
+VERBOSE=false
+ERROR_COUNT=0
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-doctor [--verbose]
+
+Checks the external environment required by the effective agent workflow.
+By default, successful checks are collapsed into a final ready result.
+EOF
+}
+
+quote_value() {
+  local value="$1"
+  value="${value//$'\n'/ }"
+  value="${value//\"/\\\"}"
+  printf '%s' "$value"
+}
+
+ok() {
+  if [[ "$VERBOSE" == true ]]; then
+    printf '[doctor] check ok name=%s\n' "$1"
+  fi
+}
+
+error() {
+  local name="$1"
+  local reason="$2"
+  local required_by="$3"
+  local fix="$4"
+
+  ((ERROR_COUNT += 1))
+  printf '[doctor] check error name=%s reason="%s"\n' \
+    "$name" "$(quote_value "$reason")" >&2
+  printf '[doctor] required-by=%s\n' "$required_by" >&2
+  printf '[doctor] fix="%s"\n' "$(quote_value "$fix")" >&2
+}
+
+command_fix() {
+  case "$1" in
+    git)
+      if command -v brew >/dev/null 2>&1; then
+        printf 'brew install git'
+      else
+        printf 'install Git from https://git-scm.com/'
+      fi
+      ;;
+    python3)
+      if command -v brew >/dev/null 2>&1; then
+        printf 'brew install python'
+      else
+        printf 'install Python 3 from https://www.python.org/'
+      fi
+      ;;
+    gh)
+      if command -v brew >/dev/null 2>&1; then
+        printf 'brew install gh'
+      else
+        printf 'install GitHub CLI from https://cli.github.com/'
+      fi
+      ;;
+    agent-project-settings|git-workflow)
+      printf 'reinstall the dotfiles AI common module'
+      ;;
+    *)
+      printf 'install required command: %s' "$1"
+      ;;
+  esac
+}
+
+check_command() {
+  local name="$1"
+  local required_by="$2"
+
+  if command -v "$name" >/dev/null 2>&1; then
+    ok "$name"
+    return 0
+  fi
+
+  error "$name" "command not found" "$required_by" "$(command_fix "$name")"
+  return 1
+}
+
+setting() {
+  agent-project-settings get "$1"
+}
+
+remote_for_branch() {
+  local branch="$1"
+  local remote
+
+  remote="$(git config --get "branch.$branch.remote" 2>/dev/null || true)"
+  if [[ -n "$remote" && "$remote" != "." ]]; then
+    printf '%s\n' "$remote"
+    return 0
+  fi
+
+  if git remote get-url origin >/dev/null 2>&1; then
+    printf 'origin\n'
+    return 0
+  fi
+
+  return 1
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --verbose)
+      VERBOSE=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf '[doctor] error reason="unknown option: %s"\n' "$1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+check_command git core || true
+check_command python3 core || true
+check_command agent-project-settings core || true
+check_command git-workflow core || true
+
+if ! command -v git >/dev/null 2>&1 \
+  || ! command -v python3 >/dev/null 2>&1 \
+  || ! command -v agent-project-settings >/dev/null 2>&1; then
+  printf '[doctor] not-ready errors=%s\n' "$ERROR_COUNT" >&2
+  exit 1
+fi
+
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  error repository "current directory is not inside a Git worktree" core \
+    "run agent-doctor from the project repository"
+  printf '[doctor] not-ready errors=%s\n' "$ERROR_COUNT" >&2
+  exit 1
+fi
+ok repository
+
+settings_output="$(agent-project-settings effective 2>&1)"
+settings_status=$?
+if [[ "$settings_status" -ne 0 ]]; then
+  error project-settings "$settings_output" .ai/project.json \
+    "fix .ai/project.json, then run agent-project-settings effective"
+  printf '[doctor] not-ready errors=%s\n' "$ERROR_COUNT" >&2
+  exit 1
+fi
+ok project-settings
+
+sync_mode="$(setting git.sync.mode)"
+commit_mode="$(setting git.commit.mode)"
+integration_mode="$(setting git.integration.mode)"
+auto_merge="$(setting git.integration.pullRequest.autoMerge)"
+
+branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+if [[ -z "$branch" ]]; then
+  error branch "detached HEAD is not supported" git-workflow \
+    "check out a local branch before starting the workflow"
+else
+  ok branch
+fi
+
+needs_remote=false
+if [[ "$sync_mode" != "none" || "$commit_mode" == "automatic" || "$integration_mode" == "pullRequest" ]]; then
+  needs_remote=true
+fi
+
+if [[ "$needs_remote" == true && -n "$branch" ]]; then
+  remote="$(remote_for_branch "$branch" || true)"
+  if [[ -z "$remote" ]]; then
+    error remote "no usable branch remote or origin remote" git.workflow \
+      "configure a Git remote for the repository"
+  elif ! git remote get-url "$remote" >/dev/null 2>&1; then
+    error remote "configured remote cannot be resolved: $remote" git.workflow \
+      "fix the Git remote configuration"
+  else
+    ok remote
+  fi
+fi
+
+if [[ "$sync_mode" == "update" && -n "$branch" ]]; then
+  upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+  if [[ -z "$upstream" ]]; then
+    error upstream "current branch has no upstream: $branch" git.sync.mode:update \
+      "set an upstream branch or change git.sync.mode"
+  else
+    ok upstream
+  fi
+fi
+
+if [[ "$integration_mode" == "pullRequest" ]]; then
+  if check_command gh git.integration.mode:pullRequest; then
+    if gh auth status >/dev/null 2>&1; then
+      ok gh-auth
+    else
+      error gh-auth "GitHub CLI is not authenticated" git.integration.mode:pullRequest \
+        "gh auth login"
+    fi
+
+    repo_name="$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || true)"
+    if [[ -z "$repo_name" ]]; then
+      error github-repository "GitHub repository could not be resolved from the current Git remote" git.integration.mode:pullRequest \
+        "ensure the repository remote points to GitHub and your account can access it"
+    else
+      ok github-repository
+    fi
+
+    if [[ "$auto_merge" == "true" && -n "$repo_name" ]]; then
+      auto_merge_allowed="$(gh repo view --json autoMergeAllowed --jq '.autoMergeAllowed' 2>/dev/null || true)"
+      if [[ "$auto_merge_allowed" == "true" ]]; then
+        ok github-auto-merge
+      else
+        error github-auto-merge "repository auto-merge is not enabled" git.integration.pullRequest.autoMerge:true \
+          "enable Allow auto-merge in the GitHub repository settings"
+      fi
+    fi
+  fi
+fi
+
+if ((ERROR_COUNT > 0)); then
+  printf '[doctor] not-ready errors=%s\n' "$ERROR_COUNT" >&2
+  exit 1
+fi
+
+printf '[doctor] ready\n'
