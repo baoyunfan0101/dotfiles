@@ -5,10 +5,6 @@ module_path \
   "$HOME/.local/bin/agent-project-settings"
 
 module_path \
-  "bin/agent-doctor" \
-  "$HOME/.local/bin/agent-doctor"
-
-module_path \
   "bin/git-workflow" \
   "$HOME/.local/bin/git-workflow"
 

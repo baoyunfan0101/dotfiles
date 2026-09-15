@@ -17,7 +17,6 @@ dotfiles/
     │   ├── module.sh
     │   ├── instructions.md
     │   └── bin/
-    │       ├── agent-doctor
     │       ├── git-workflow
     │       └── project-settings
     └── codex/
@@ -85,18 +84,11 @@ The `common` module installs:
 
 ```text
 ~/.local/bin/agent-project-settings
-~/.local/bin/agent-doctor
 ~/.local/bin/git-workflow
 ~/.config/agent-workflow/instructions.md
 ```
 
-Run the configuration-aware preflight before starting work:
-
-```bash
-agent-doctor
-```
-
-`git-workflow` provides the shared Git workflow used by supported agents. External dependencies are reported by `agent-doctor`; the installer only manages files owned by this repository.
+`git-workflow prepare` automatically validates the configured workflow's required external dependencies before modifying the repository. The installer only manages files owned by this repository.
 
 Project-level workflow behavior can be configured in:
 

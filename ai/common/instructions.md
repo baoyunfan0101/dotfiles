@@ -9,8 +9,6 @@
 
 ## Workflow
 
-Run `agent-doctor` before starting work. If it fails, surface its output and stop the automatic workflow.
-
 Use `git-workflow` for Git operations; do not reproduce its behavior manually.
 
 Prepare with:
@@ -43,4 +41,4 @@ branch: <type>/<area>-<description>
 commit: <type>(<area>): <summary>
 ```
 
-Surface each `[doctor]` and `[git]` result verbatim exactly once.
+Surface each `[git]` result verbatim exactly once.
