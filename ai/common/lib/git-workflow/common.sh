@@ -48,16 +48,16 @@ Push options:
 
 Finish options:
   --message MESSAGE
-      Squash commit message, or optional merge-commit message.
+      Required for squash local merge; optional for merge-commit delivery.
 
   --title TITLE
-      Pull request title.
+      Required for pull request delivery.
 
   --body BODY
-      Pull request body.
+      Optional pull request body; mutually exclusive with --body-file.
 
   --body-file FILE
-      Read the pull request body from FILE.
+      Read an optional pull request body from FILE; mutually exclusive with --body.
 
   -h, --help
       Show this help.

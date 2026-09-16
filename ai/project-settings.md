@@ -296,7 +296,7 @@ Supported values:
 | `"localMerge"` | Check out the original base branch, synchronize it, integrate the task branch locally, and push the resulting base branch. |
 | `"pullRequest"` | Push the task branch and create or reuse a GitHub pull request targeting the original base branch. |
 
-`"pullRequest"` mode requires the GitHub CLI (`gh`) and authentication for `start` and `finish`.
+`"pullRequest"` mode requires the GitHub CLI (`gh`) and authentication at `start` and when `finish` has a workflow-created task to deliver. A skipped `finish` does not require GitHub dependencies.
 
 A pull request title must be supplied to `git-workflow finish`.
 
