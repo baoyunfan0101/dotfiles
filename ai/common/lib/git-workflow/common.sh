@@ -10,17 +10,19 @@ Usage:
 
 Commands:
   start
-      Back up selected local changes, synchronize the current branch,
-      select or create the working branch, and reapply the backup.
+      Start a repository-changing task once before editing: protect changes,
+      synchronize, select the working branch, and restore protected changes.
 
   commit
       Commit one atomic change. Automatic mode also pushes it.
 
   push
-      Push the current branch according to project settings.
+      Auxiliary operation: push the current branch according to project settings.
 
   finish
-      Finish a workflow-created task according to project settings.
+      Finish and deliver a completed workflow-created task according to project settings.
+
+Read-only tasks do not use workflow commands.
 
 Start options:
   --branch-name NAME
