@@ -4,6 +4,14 @@ set -Eeuo pipefail
 WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
 
+INTEGRATION_MERGE_METHOD=""
+DELETE_AFTER_INTEGRATION=false
+INTEGRATION_MESSAGE=""
+PR_TITLE=""
+PR_BODY=""
+PR_BODY_FILE=""
+INTEGRATION_BRANCH_DELETED=false
+
 parse_finish_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -56,16 +64,6 @@ parse_finish_args() {
   if [[ -n "$PR_BODY" && -n "$PR_BODY_FILE" ]]; then
     fail "--body and --body-file cannot be used together"
   fi
-}
-
-load_finish_settings() {
-  agent-project-settings effective >/dev/null
-
-  SYNC_MODE="$(setting git.sync.mode)"
-  SYNC_UPDATE_METHOD="$(setting git.sync.updateMethod)"
-  INTEGRATION_MODE="$(setting git.integration.mode)"
-  INTEGRATION_MERGE_METHOD="$(setting git.integration.mergeMethod)"
-  DELETE_AFTER_INTEGRATION="$(setting git.branch.deleteAfterIntegration)"
 }
 
 delete_delivered_branch() {

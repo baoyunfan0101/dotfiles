@@ -4,6 +4,12 @@ set -Eeuo pipefail
 WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
 
+COMMIT_MESSAGE=""
+COMMIT_ALL=false
+COMMIT_OVERRIDE_MANUAL=false
+COMMIT_PATHS=()
+COMMIT_PATH_COUNT=0
+
 parse_commit_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in

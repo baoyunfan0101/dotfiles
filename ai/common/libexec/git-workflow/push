@@ -4,6 +4,8 @@ set -Eeuo pipefail
 WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
 
+PUSH_OVERRIDE_MANUAL=false
+
 parse_push_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in

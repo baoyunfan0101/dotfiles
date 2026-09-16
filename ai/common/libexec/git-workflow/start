@@ -27,15 +27,6 @@ parse_start_args() {
   done
 }
 
-load_start_settings() {
-  BACKUP_MODE="$(setting git.backup.mode)"
-  BACKUP_METHOD="$(setting git.backup.method)"
-  SYNC_MODE="$(setting git.sync.mode)"
-  SYNC_UPDATE_METHOD="$(setting git.sync.updateMethod)"
-  BRANCH_MODE="$(setting git.branch.mode)"
-  BASE_BRANCHES_JSON="$(setting git.branch.baseBranches)"
-}
-
 print_start_result() {
   local backup_result="none"
 
