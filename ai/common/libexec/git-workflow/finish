@@ -189,6 +189,7 @@ finish() {
   local branch_created
 
   parse_finish_args "$@"
+  preflight
   require_repository
   load_finish_settings
 

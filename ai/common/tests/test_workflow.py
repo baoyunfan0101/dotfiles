@@ -252,6 +252,18 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.git("branch", "--show-current"), "feat/test")
         self.assertEqual(self.git("config", "branch.feat/test.agentWorkflowCreated"), "true")
 
+    def test_finish_rechecks_authentication(self):
+        self.stub_gh()
+        self.save_settings(integration={"mode": "pullRequest"})
+        self.start()
+        (self.bin / "gh").write_text("#!/bin/sh\nexit 1\n")
+        self.change()
+        self.commit()
+        self.run_cli("push")
+        self.assertIn("check=gh-auth", self.run_cli("finish", "--title", "Task", ok=False).stderr)
+        self.assertEqual(self.git("branch", "--show-current"), "feat/test")
+        self.assertEqual(self.git("config", "branch.feat/test.agentWorkflowCreated"), "true")
+
 
 if __name__ == "__main__":
     unittest.main()

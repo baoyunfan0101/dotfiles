@@ -15,13 +15,10 @@ load_start_settings() {
 }
 
 load_commit_settings() {
-  agent-project-settings effective >/dev/null
   COMMIT_MODE="$(setting git.commit.mode)"
 }
 
 load_finish_settings() {
-  agent-project-settings effective >/dev/null
-
   SYNC_MODE="$(setting git.sync.mode)"
   SYNC_UPDATE_METHOD="$(setting git.sync.updateMethod)"
   INTEGRATION_MODE="$(setting git.integration.mode)"

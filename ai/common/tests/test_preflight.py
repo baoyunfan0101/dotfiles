@@ -65,9 +65,17 @@ class PreflightTests(unittest.TestCase):
         }))
 
     def start(self):
+        return self.run_action("start")
+
+    def run_action(self, action):
+        arguments = {
+            "start": ["--branch-name", "feat/test"],
+            "commit": ["--message", "Change", "--all"],
+            "finish": ["--title", "Task"],
+            "push": [],
+        }
         return subprocess.run(
-            [BASH, str(COMMON / "bin/git-workflow"), "start",
-             "--branch-name", "feat/test"],
+            [BASH, str(COMMON / "bin/git-workflow"), action, *arguments[action]],
             cwd=self.repo, env={**self.env, "PATH": str(self.bin)},
             capture_output=True, text=True,
         )
@@ -79,16 +87,16 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(result.stdout, "[git] start ok backup=none sync=skipped "
                          "branch=feat/test base=main created=true\n")
 
-    def assert_blocked(self, check, reason, required_by, fix):
+    def assert_blocked(self, check, reason, required_by, fix, action="start"):
         (self.repo / "tracked").write_text("changed\n")
         (self.repo / "untracked").write_text("untracked\n")
         before = {str(p.relative_to(self.repo)): p.read_bytes()
                   for p in self.repo.rglob("*") if p.is_file()}
-        result = self.start()
+        result = self.run_action(action)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr,
-                         f'[git] start error check={check} reason="{reason}" '
+                         f'[git] {action} error check={check} reason="{reason}" '
                          f'required-by={required_by} fix="{fix}"\n')
         after = {str(p.relative_to(self.repo)): p.read_bytes()
                  for p in self.repo.rglob("*") if p.is_file()}
@@ -131,8 +139,9 @@ class PreflightTests(unittest.TestCase):
                         '{"schemaVersion":1,"git":{"integration":{"mode":"invalid"}}}'):
             with self.subTest(content=content):
                 (self.repo / ".ai/project.json").write_text(content)
-                self.assert_blocked("project-settings", "configuration invalid", "core",
-                                    "fix .ai/project.json and run agent-project-settings effective")
+                for action in ("start", "commit", "finish", "push"):
+                    self.assert_blocked("project-settings", "configuration invalid", "core",
+                                        "fix .ai/project.json and run agent-project-settings effective", action)
 
     def test_missing_core_commands(self):
         for command in ("git", "python3", "agent-project-settings"):
@@ -143,9 +152,30 @@ class PreflightTests(unittest.TestCase):
                 try:
                     fix = ("re-run the dotfiles AI installer" if command == "agent-project-settings"
                            else f"install {command} and ensure it is on PATH")
-                    self.assert_blocked(command, "command not found", "core", fix)
+                    for action in ("start", "commit", "finish", "push"):
+                        self.assert_blocked(command, "command not found", "core", fix, action)
                 finally:
                     hidden.rename(path)
+
+    def test_finish_requires_gh_and_authentication(self):
+        self.configure("pullRequest")
+        self.assert_blocked("gh", "command not found", "git.integration.mode:pullRequest",
+                            "install gh and ensure it is on PATH", "finish")
+        self.stub("gh", "exit 1")
+        self.assert_blocked("gh-auth", "authentication failed", "git.integration.mode:pullRequest",
+                            "run gh auth login", "finish")
+
+    def test_commit_and_push_do_not_require_gh(self):
+        self.configure("pullRequest")
+        path = self.repo / ".ai/project.json"
+        config = json.loads(path.read_text())
+        config["git"]["commit"] = {"mode": "manual"}
+        path.write_text(json.dumps(config))
+        for action in ("commit", "push"):
+            result = self.run_action(action)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, f"[git] {action} skip reason=manual\n")
+            self.assertEqual(result.stderr, "")
 
 
 if __name__ == "__main__":

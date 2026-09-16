@@ -22,7 +22,8 @@ preflight() {
       "fix .ai/project.json and run agent-project-settings effective"
   fi
 
-  if [[ "$integration_mode" == pullRequest ]]; then
+  if [[ "$integration_mode" == pullRequest &&
+        ( "$CURRENT_ACTION" == start || "$CURRENT_ACTION" == finish ) ]]; then
     preflight_command gh git.integration.mode:pullRequest \
       "install gh and ensure it is on PATH"
 

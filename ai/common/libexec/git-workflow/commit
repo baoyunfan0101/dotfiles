@@ -66,6 +66,7 @@ commit_changes() {
   local commit_sha
 
   parse_commit_args "$@"
+  preflight
   require_repository
   load_commit_settings
 
