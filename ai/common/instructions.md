@@ -9,21 +9,21 @@
 
 ## Workflow
 
-Use `git-workflow` for Git operations; do not reproduce its behavior manually.
+Use `git-workflow` for repository-changing tasks. Do not run workflow commands for read-only tasks or reproduce their Git operations manually.
 
-Start with:
+Start once before the task's first edit:
 
 ```bash
 git-workflow start --branch-name <candidate-branch>
 ```
 
-Commit each atomic change by path with:
+Commit each atomic change by path, as often as needed:
 
 ```bash
 git-workflow commit --message "<message>" -- <paths>...
 ```
 
-Finish a workflow-created branch with:
+Finish the workflow-created task once when complete, within the user's authorized delivery scope:
 
 ```bash
 git-workflow finish \
