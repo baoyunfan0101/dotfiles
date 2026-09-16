@@ -64,7 +64,7 @@ The field is required when `.ai/project.json` exists.
 
 ### `git.sync.mode`
 
-Controls how the current branch is synchronized during workflow preparation.
+Controls how the current branch is synchronized during `git-workflow start`.
 
 Default:
 
@@ -146,7 +146,7 @@ Supported values:
 | Value | Meaning |
 |---|---|
 | `"stash"` | Store the backup as a Git stash. The backup stash remains available after the changes are reapplied. |
-| `"commit"` | Store the backup as a commit referenced under `refs/agent-workflow/backups/`. A temporary stash is used only to transport the working-tree changes while the workflow prepares the repository. |
+| `"commit"` | Store the backup as a commit referenced under `refs/agent-workflow/backups/`. A temporary stash transports working-tree changes during `git-workflow start`. |
 
 This setting has no effect when:
 
@@ -194,7 +194,7 @@ A manually overridden commit is not automatically pushed.
 
 ### `git.branch.mode`
 
-Controls whether workflow preparation creates a task branch.
+Controls whether `git-workflow start` creates a task branch.
 
 Default:
 
@@ -207,7 +207,7 @@ Supported values:
 | Value | Meaning |
 |---|---|
 | `"current"` | Continue working on the current branch. Never create a task branch automatically. |
-| `"alwaysCreate"` | Always create a new task branch during workflow preparation. |
+| `"alwaysCreate"` | Always create a new task branch during `git-workflow start`. |
 | `"fromBase"` | Create a new task branch only when the current branch is listed in `git.branch.baseBranches`. Otherwise continue on the current branch. |
 
 When the selected mode requires a new branch, `git-workflow start` must receive a candidate branch name:
@@ -296,7 +296,7 @@ Supported values:
 | `"localMerge"` | Check out the original base branch, synchronize it, integrate the task branch locally, and push the resulting base branch. |
 | `"pullRequest"` | Push the task branch and create or reuse a GitHub pull request targeting the original base branch. |
 
-`"pullRequest"` mode requires the GitHub CLI (`gh`).
+`"pullRequest"` mode requires the GitHub CLI (`gh`) and authentication for `start` and `finish`.
 
 A pull request title must be supplied to `git-workflow finish`.
 

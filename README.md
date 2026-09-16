@@ -5,24 +5,18 @@ Personal development environment configuration.
 ## Structure
 
 ```text
-dotfiles/
-├── README.md
-├── .gitignore
-└── ai/
-    ├── project-settings.md
-    ├── install.sh
-    ├── install/
-    │   └── lib.sh
-    ├── common/
-    │   ├── module.sh
-    │   ├── instructions.md
-    │   └── bin/
-    │       ├── git-workflow
-    │       └── project-settings
-    └── codex/
-        ├── module.sh
-        ├── AGENTS.md
-        └── skills/
+ai/
+  install.sh                 Installer entry point
+  install/                   Installer helpers
+  project-settings.md        Configuration reference
+  common/
+    module.sh                Managed files
+    instructions.md          Shared Agent contract
+    bin/                     Public command entry points
+    libexec/git-workflow/     start, commit, finish, push executables
+    lib/git-workflow/         Shared workflow libraries
+    tests/                   Workflow regression tests
+  codex/                     Agent configuration and skills
 ```
 
 `ai/install.sh` is the public installer.
@@ -85,10 +79,23 @@ The `common` module installs:
 ```text
 ~/.local/bin/agent-project-settings
 ~/.local/bin/git-workflow
+~/.local/libexec/git-workflow/
+~/.local/lib/git-workflow/
 ~/.config/agent-workflow/instructions.md
 ```
 
-`git-workflow start` automatically validates the configured workflow's required external dependencies before modifying the repository. The installer only manages files owned by this repository.
+Read-only tasks do not run workflow commands. Repository-changing tasks use:
+
+| Command | When to use |
+|---|---|
+| `git-workflow start --branch-name <name>` | Once before the first edit; begins the task. |
+| `git-workflow commit --message "<message>" -- <paths>...` | For each atomic change; automatic mode also pushes. |
+| `git-workflow finish [options]` | Once when complete; delivers through local merge or a pull request according to settings and user authorization. |
+| `git-workflow push` | Auxiliary explicit push, such as manual mode or recovery. |
+
+The normal lifecycle is `start -> commit* -> finish`, with zero or more commits and at most one finish. Run `git-workflow --help` for options.
+
+Required external dependencies are validated internally. The installer only manages this repository's files.
 
 Project-level workflow behavior can be configured in:
 
@@ -105,3 +112,9 @@ agent-project-settings effective
 ```
 
 See [Project Settings](ai/project-settings.md) for all supported settings, values, defaults, and behavior.
+
+Run the regression tests with:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s ai/common/tests
+```
