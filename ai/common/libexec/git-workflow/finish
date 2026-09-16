@@ -189,7 +189,7 @@ finish() {
   local branch_created
 
   parse_finish_args "$@"
-  preflight
+  preflight_core
   require_repository
   load_finish_settings
 
@@ -201,6 +201,8 @@ finish() {
     printf '[git] finish skip reason=no-workflow-created-branch\n'
     return 0
   fi
+
+  preflight_delivery
 
   if has_local_changes; then
     fail "working tree must be clean before finish"

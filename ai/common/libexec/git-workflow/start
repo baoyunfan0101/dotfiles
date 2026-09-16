@@ -45,7 +45,8 @@ print_start_result() {
 start() {
   CURRENT_ACTION="start"
   parse_start_args "$@"
-  preflight
+  preflight_core
+  preflight_delivery
   require_repository
 
   ORIGINAL_BRANCH="$(current_branch)"

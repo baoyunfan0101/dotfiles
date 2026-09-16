@@ -30,7 +30,7 @@ push_changes() {
   local base_branch
 
   parse_push_args "$@"
-  preflight
+  preflight_core
   require_repository
   load_commit_settings
 

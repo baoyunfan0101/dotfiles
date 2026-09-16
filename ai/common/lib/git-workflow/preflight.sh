@@ -10,20 +10,19 @@ preflight_command() {
   fi
 }
 
-preflight() {
-  local integration_mode
-
+preflight_core() {
   preflight_command git core "install git and ensure it is on PATH"
   preflight_command python3 core "install python3 and ensure it is on PATH"
   preflight_command agent-project-settings core "re-run the dotfiles AI installer"
 
-  if ! integration_mode="$(setting git.integration.mode 2>/dev/null)"; then
+  if ! INTEGRATION_MODE="$(setting git.integration.mode 2>/dev/null)"; then
     preflight_error project-settings "configuration invalid" core \
       "fix .ai/project.json and run agent-project-settings effective"
   fi
+}
 
-  if [[ "$integration_mode" == pullRequest &&
-        ( "$CURRENT_ACTION" == start || "$CURRENT_ACTION" == finish ) ]]; then
+preflight_delivery() {
+  if [[ "$INTEGRATION_MODE" == pullRequest ]]; then
     preflight_command gh git.integration.mode:pullRequest \
       "install gh and ensure it is on PATH"
 

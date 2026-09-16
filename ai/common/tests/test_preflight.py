@@ -71,7 +71,7 @@ class PreflightTests(unittest.TestCase):
         arguments = {
             "start": ["--branch-name", "feat/test"],
             "commit": ["--message", "Change", "--all"],
-            "finish": ["--title", "Task"],
+            "finish": [],
             "push": [],
         }
         return subprocess.run(
@@ -102,7 +102,12 @@ class PreflightTests(unittest.TestCase):
                  for p in self.repo.rglob("*") if p.is_file()}
         self.assertEqual(before, after)
         calls = self.log.read_text().splitlines() if self.log.exists() else []
-        self.assertTrue(all(call == "rev-parse --show-toplevel" for call in calls), calls)
+        allowed = {"rev-parse --show-toplevel"}
+        if action == "finish":
+            allowed.update({"rev-parse --is-inside-work-tree", "symbolic-ref --quiet --short HEAD",
+                            "config --get branch.feat/test.agentWorkflowBase",
+                            "config --bool --get branch.feat/test.agentWorkflowCreated"})
+        self.assertTrue(all(call in allowed for call in calls), calls)
 
     def test_local_merge_without_gh(self):
         self.assert_ready()
@@ -159,11 +164,34 @@ class PreflightTests(unittest.TestCase):
 
     def test_finish_requires_gh_and_authentication(self):
         self.configure("pullRequest")
+        self.git("checkout", "-qb", "feat/test")
+        self.git("config", "branch.feat/test.agentWorkflowBase", "main")
+        self.git("config", "branch.feat/test.agentWorkflowCreated", "true")
         self.assert_blocked("gh", "command not found", "git.integration.mode:pullRequest",
                             "install gh and ensure it is on PATH", "finish")
         self.stub("gh", "exit 1")
         self.assert_blocked("gh-auth", "authentication failed", "git.integration.mode:pullRequest",
                             "run gh auth login", "finish")
+
+    def test_non_workflow_finish_skips_without_gh(self):
+        self.configure("pullRequest")
+        before = {str(p.relative_to(self.repo)): p.read_bytes()
+                  for p in self.repo.rglob("*") if p.is_file()}
+        result = self.run_action("finish")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "[git] finish skip reason=no-workflow-created-branch\n")
+        self.assertEqual(result.stderr, "")
+        after = {str(p.relative_to(self.repo)): p.read_bytes()
+                 for p in self.repo.rglob("*") if p.is_file()}
+        self.assertEqual(before, after)
+
+    def test_non_workflow_finish_does_not_check_authentication(self):
+        self.configure("pullRequest")
+        self.stub("gh", f'printf called > {shlex.quote(str(self.root / "gh-called"))}; exit 1')
+        result = self.run_action("finish")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "[git] finish skip reason=no-workflow-created-branch\n")
+        self.assertFalse((self.root / "gh-called").exists())
 
     def test_commit_and_push_do_not_require_gh(self):
         self.configure("pullRequest")
