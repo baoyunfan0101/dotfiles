@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+
+parse_push_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --override-manual)
+        PUSH_OVERRIDE_MANUAL=true
+        shift
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        fail "unknown push option: $1"
+        ;;
+    esac
+  done
+}
+
+push_changes() {
+  CURRENT_ACTION="push"
+  local branch
+  local base_branch
+
+  parse_push_args "$@"
+  require_repository
+  load_commit_settings
+
+  case "$COMMIT_MODE" in
+    manual)
+      if [[ "$PUSH_OVERRIDE_MANUAL" != true ]]; then
+        printf '[git] push skip reason=manual\n'
+        return 0
+      fi
+      ;;
+    automatic)
+      ;;
+    *)
+      fail "unsupported git.commit.mode: $COMMIT_MODE"
+      ;;
+  esac
+
+  branch="$(current_branch)"
+  base_branch="$(workflow_base_branch "$branch")"
+  push_branch "$branch" "$base_branch"
+
+  printf '[git] push ok branch=%s\n' "$branch"
+}
+
+push_changes "$@"

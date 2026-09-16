@@ -84,6 +84,38 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn(f"[git] {action} error", self.run_cli(action, "--invalid", ok=False).stderr)
         self.assertIn("no-workflow-created-branch", self.run_cli("finish").stdout)
 
+    def test_command_executables(self):
+        for action in ("start", "commit", "finish", "push"):
+            path = COMMON / "libexec/git-workflow" / action
+            self.assertTrue(os.access(path, os.X_OK))
+            self.assertEqual(path.read_text().splitlines()[0], "#!/usr/bin/env bash")
+            self.assertIn("Usage:", self.run_cli("--help", executable=path).stdout)
+
+    def check_install(self, mode):
+        destination = self.root / "installed home"
+        install_env = {**self.env, "HOME": str(destination),
+                       "CODEX_HOME": str(destination / ".codex"),
+                       "XDG_CONFIG_HOME": str(destination / ".config"),
+                       "XDG_STATE_HOME": str(destination / ".local/state")}
+        result = subprocess.run([str(COMMON.parent / "install.sh"), "--agents", "codex", mode],
+                                env=install_env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.env["PATH"] = f"{destination / '.local/bin'}:{os.environ['PATH']}"
+        installed = destination / ".local/bin/git-workflow"
+        self.assertIn("[git] start ok", self.run_cli("start", "--branch-name", "feat/test", executable=installed).stdout)
+        self.change()
+        self.run_cli("commit", "--message", "Installed", "--all", executable=installed)
+        self.run_cli("push", executable=installed)
+        self.run_cli("finish", executable=installed)
+        for path in (destination / ".local/lib/git-workflow").glob("*.sh"):
+            self.assertFalse(path.stat().st_mode & 0o111)
+
+    def test_symlink_install(self):
+        self.check_install("--symlink")
+
+    def test_copy_install(self):
+        self.check_install("--copy")
+
     def test_atomic_paths_and_automatic_push(self):
         self.start()
         self.change()

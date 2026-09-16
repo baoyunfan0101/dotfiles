@@ -42,6 +42,8 @@ class PreflightTests(unittest.TestCase):
                   f'exec {shlex.quote(GIT)} "$@"')
         (self.bin / "python3").symlink_to(sys.executable)
         (self.bin / "date").symlink_to(shutil.which("date"))
+        for command in ("bash", "dirname", "readlink", "cat"):
+            (self.bin / command).symlink_to(shutil.which(command))
         (self.bin / "agent-project-settings").symlink_to(COMMON / "bin/project-settings")
 
     def git(self, *args):

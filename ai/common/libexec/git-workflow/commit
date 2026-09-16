@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+
+parse_commit_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --message)
+        [[ $# -ge 2 ]] || fail "missing value for --message"
+        COMMIT_MESSAGE="$2"
+        shift 2
+        ;;
+      --message=*)
+        COMMIT_MESSAGE="${1#*=}"
+        shift
+        ;;
+      --all)
+        COMMIT_ALL=true
+        shift
+        ;;
+      --override-manual)
+        COMMIT_OVERRIDE_MANUAL=true
+        shift
+        ;;
+      --)
+        shift
+        while [[ $# -gt 0 ]]; do
+          COMMIT_PATHS+=("$1")
+          ((COMMIT_PATH_COUNT += 1))
+          shift
+        done
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        fail "unknown commit option: $1"
+        ;;
+    esac
+  done
+
+  [[ -n "$COMMIT_MESSAGE" ]] || fail "--message is required"
+
+  if [[ "$COMMIT_ALL" == true && "$COMMIT_PATH_COUNT" -gt 0 ]]; then
+    fail "--all cannot be combined with explicit paths"
+  fi
+
+  if [[ "$COMMIT_ALL" != true && "$COMMIT_PATH_COUNT" -eq 0 ]]; then
+    fail "use --all or provide paths after --"
+  fi
+}
+
+commit_changes() {
+  CURRENT_ACTION="commit"
+  local branch
+  local base_branch
+  local commit_sha
+
+  parse_commit_args "$@"
+  require_repository
+  load_commit_settings
+
+  case "$COMMIT_MODE" in
+    manual)
+      if [[ "$COMMIT_OVERRIDE_MANUAL" != true ]]; then
+        printf '[git] commit skip reason=manual\n'
+        return 0
+      fi
+      ;;
+    automatic)
+      ;;
+    *)
+      fail "unsupported git.commit.mode: $COMMIT_MODE"
+      ;;
+  esac
+
+  if [[ "$COMMIT_ALL" == true ]]; then
+    git add -A
+    git diff --cached --quiet && fail "no changes to commit"
+    git commit --quiet -m "$COMMIT_MESSAGE"
+  else
+    git add -A -- "${COMMIT_PATHS[@]}"
+
+    if git diff --quiet HEAD -- "${COMMIT_PATHS[@]}"; then
+      fail "selected paths have no changes to commit"
+    fi
+
+    git commit --quiet -m "$COMMIT_MESSAGE" -- "${COMMIT_PATHS[@]}"
+  fi
+
+  commit_sha="$(git rev-parse HEAD)"
+  branch="$(current_branch)"
+
+  if [[ "$COMMIT_MODE" == "manual" ]]; then
+    printf '[git] commit ok sha=%s branch=%s pushed=false\n' "${commit_sha:0:7}" "$branch"
+    return 0
+  fi
+
+  base_branch="$(workflow_base_branch "$branch")"
+
+  if ! push_branch "$branch" "$base_branch"; then
+    fail "commit ${commit_sha:0:7} created but push failed"
+  fi
+
+  printf '[git] commit ok sha=%s branch=%s pushed=true\n' "${commit_sha:0:7}" "$branch"
+}
+
+commit_changes "$@"

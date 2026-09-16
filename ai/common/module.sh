@@ -9,5 +9,13 @@ module_path \
   "$HOME/.local/bin/git-workflow"
 
 module_path \
+  "libexec/git-workflow" \
+  "$HOME/.local/libexec/git-workflow"
+
+module_path \
+  "lib/git-workflow" \
+  "$HOME/.local/lib/git-workflow"
+
+module_path \
   "instructions.md" \
   "$COMMON_CONFIG_DIR/instructions.md"
