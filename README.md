@@ -88,7 +88,7 @@ The `common` module installs:
 ~/.config/agent-workflow/instructions.md
 ```
 
-`git-workflow prepare` automatically validates the configured workflow's required external dependencies before modifying the repository. The installer only manages files owned by this repository.
+`git-workflow start` automatically validates the configured workflow's required external dependencies before modifying the repository. The installer only manages files owned by this repository.
 
 Project-level workflow behavior can be configured in:
 

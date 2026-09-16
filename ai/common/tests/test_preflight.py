@@ -62,19 +62,19 @@ class PreflightTests(unittest.TestCase):
             "git": {"sync": {"mode": sync}, "integration": {"mode": mode}},
         }))
 
-    def prepare(self):
+    def start(self):
         return subprocess.run(
-            [BASH, str(COMMON / "bin/git-workflow"), "prepare",
+            [BASH, str(COMMON / "bin/git-workflow"), "start",
              "--branch-name", "feat/test"],
             cwd=self.repo, env={**self.env, "PATH": str(self.bin)},
             capture_output=True, text=True,
         )
 
     def assert_ready(self):
-        result = self.prepare()
+        result = self.start()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
-        self.assertEqual(result.stdout, "[git] prepare ok backup=none sync=skipped "
+        self.assertEqual(result.stdout, "[git] start ok backup=none sync=skipped "
                          "branch=feat/test base=main created=true\n")
 
     def assert_blocked(self, check, reason, required_by, fix):
@@ -82,11 +82,11 @@ class PreflightTests(unittest.TestCase):
         (self.repo / "untracked").write_text("untracked\n")
         before = {str(p.relative_to(self.repo)): p.read_bytes()
                   for p in self.repo.rglob("*") if p.is_file()}
-        result = self.prepare()
+        result = self.start()
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr,
-                         f'[git] prepare error check={check} reason="{reason}" '
+                         f'[git] start error check={check} reason="{reason}" '
                          f'required-by={required_by} fix="{fix}"\n')
         after = {str(p.relative_to(self.repo)): p.read_bytes()
                  for p in self.repo.rglob("*") if p.is_file()}
@@ -96,6 +96,15 @@ class PreflightTests(unittest.TestCase):
 
     def test_local_merge_without_gh(self):
         self.assert_ready()
+
+    def test_removed_commands_are_rejected(self):
+        for command in ("prepare", "integrate"):
+            result = subprocess.run(
+                [BASH, str(COMMON / "bin/git-workflow"), command],
+                cwd=self.repo, capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(f'unknown command: {command}', result.stderr)
 
     def test_pull_request_without_gh(self):
         self.configure("pullRequest", sync="fetch")

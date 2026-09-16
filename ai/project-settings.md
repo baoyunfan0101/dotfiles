@@ -108,7 +108,7 @@ This setting has no effect when `git.sync.mode` is `"none"` or `"fetch"`.
 
 ## Git backup
 
-Before synchronization or branch selection, `git-workflow prepare` can preserve local changes and then restore them afterward.
+Before synchronization or branch selection, `git-workflow start` can preserve local changes and then restore them afterward.
 
 ### `git.backup.mode`
 
@@ -210,13 +210,13 @@ Supported values:
 | `"alwaysCreate"` | Always create a new task branch during workflow preparation. |
 | `"fromBase"` | Create a new task branch only when the current branch is listed in `git.branch.baseBranches`. Otherwise continue on the current branch. |
 
-When the selected mode requires a new branch, `git-workflow prepare` must receive a candidate branch name:
+When the selected mode requires a new branch, `git-workflow start` must receive a candidate branch name:
 
 ```bash
-git-workflow prepare --branch-name <candidate-branch>
+git-workflow start --branch-name <candidate-branch>
 ```
 
-Branches created by the workflow are marked with Git configuration metadata so that they can later be recognized and integrated by `git-workflow integrate`.
+Branches created by the workflow are marked with Git configuration metadata so that they can later be recognized and integrated by `git-workflow finish`.
 
 ### `git.branch.baseBranches`
 
@@ -275,7 +275,7 @@ When squash integration is used, the local task branch is force-deleted because 
 
 Only branches created and marked by the workflow are automatically integrated.
 
-If the current branch was not created by `git-workflow prepare`, `git-workflow integrate` skips integration.
+If the current branch was not created by `git-workflow start`, `git-workflow finish` skips integration.
 
 The working tree must be clean before integration.
 
@@ -298,12 +298,12 @@ Supported values:
 
 `"pullRequest"` mode requires the GitHub CLI (`gh`).
 
-A pull request title must be supplied to `git-workflow integrate`.
+A pull request title must be supplied to `git-workflow finish`.
 
 Example:
 
 ```bash
-git-workflow integrate \
+git-workflow finish \
   --title "Add project settings documentation" \
   --body "Document all supported project settings."
 ```
@@ -334,7 +334,7 @@ For `"mergeCommit"`, an integration message is optional. If omitted, Git generat
 Example:
 
 ```bash
-git-workflow integrate \
+git-workflow finish \
   --message "Merge project settings documentation"
 ```
 
@@ -343,7 +343,7 @@ For `"squash"`, an integration message is required because the workflow must cre
 Example:
 
 ```bash
-git-workflow integrate \
+git-workflow finish \
   --message "docs(ai): document project settings"
 ```
 

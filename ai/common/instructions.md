@@ -11,10 +11,10 @@
 
 Use `git-workflow` for Git operations; do not reproduce its behavior manually.
 
-Prepare with:
+Start with:
 
 ```bash
-git-workflow prepare --branch-name <candidate-branch>
+git-workflow start --branch-name <candidate-branch>
 ```
 
 Commit each atomic change by path with:
@@ -26,7 +26,7 @@ git-workflow commit --message "<message>" -- <paths>...
 Finish a workflow-created branch with:
 
 ```bash
-git-workflow integrate \
+git-workflow finish \
   --message "<message>" \
   --title "<title>" \
   --body "<body>"
