@@ -26,10 +26,7 @@ git-workflow commit --message "<message>" -- <paths>...
 Finish the workflow-created task once when complete, within the user's authorized delivery scope:
 
 ```bash
-git-workflow finish \
-  --message "<message>" \
-  --title "<title>" \
-  --body "<body>"
+git-workflow finish
 ```
 
 Use `--all` only for one atomic change. Use `--override-manual` only for an explicit user request blocked by manual mode.
