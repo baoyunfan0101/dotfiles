@@ -298,7 +298,7 @@ Supported values:
 
 `"pullRequest"` mode requires the GitHub CLI (`gh`) and authentication at `start` and when `finish` has a workflow-created task to deliver. A skipped `finish` does not require GitHub dependencies.
 
-A pull request title must be supplied to `git-workflow finish`.
+`git-workflow finish` derives the title from the sole task commit's subject, or from the task branch name for other commit counts. `--title` overrides it; the body is optional.
 
 Example:
 
@@ -338,7 +338,7 @@ git-workflow finish \
   --message "Merge project settings documentation"
 ```
 
-For `"squash"`, an integration message is required because the workflow must create the resulting squash commit.
+For `"squash"`, the message defaults to the sole task commit's subject, or to a summary derived from the task branch name. `--message` overrides it. For example, `feat/ai-harness-preflight` becomes `feat(ai): harness preflight`; names outside that convention are kept unchanged.
 
 Example:
 

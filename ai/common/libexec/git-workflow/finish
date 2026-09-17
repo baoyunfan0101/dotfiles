@@ -92,6 +92,28 @@ delete_delivered_branch() {
   fi
 }
 
+task_summary() {
+  local working_branch="$1"
+  local base_branch="$2"
+  local subject
+  local description
+
+  if [[ "$(git rev-list --count "$base_branch..$working_branch")" == 1 ]]; then
+    subject="$(git log -1 --format=%s "$base_branch..$working_branch")"
+    if [[ -n "$subject" ]]; then
+      printf '%s\n' "$subject"
+      return 0
+    fi
+  fi
+
+  if [[ "$working_branch" =~ ^([[:alnum:]_]+)/([[:alnum:]_]+)-(.+)$ ]]; then
+    description="${BASH_REMATCH[3]//-/ }"
+    printf '%s(%s): %s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "$description"
+  else
+    printf '%s\n' "$working_branch"
+  fi
+}
+
 finish_local_merge() {
   local working_branch="$1"
   local base_branch="$2"
@@ -99,7 +121,7 @@ finish_local_merge() {
   local merge_needed=true
 
   if [[ "$INTEGRATION_MERGE_METHOD" == "squash" && -z "$INTEGRATION_MESSAGE" ]]; then
-    fail "--message is required when git.integration.mergeMethod is squash"
+    INTEGRATION_MESSAGE="$(task_summary "$working_branch" "$base_branch")"
   fi
 
   git checkout -q "$base_branch"
@@ -162,7 +184,9 @@ create_pull_request() {
   local pr_url
 
   require_command gh
-  [[ -n "$PR_TITLE" ]] || fail "--title is required when git.integration.mode is pullRequest"
+  if [[ -z "$PR_TITLE" ]]; then
+    PR_TITLE="$(task_summary "$working_branch" "$base_branch")"
+  fi
 
   push_branch "$working_branch" "$base_branch"
   pr_url="$(gh pr view "$working_branch" --json url --jq '.url' 2>/dev/null || true)"

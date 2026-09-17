@@ -205,6 +205,7 @@ class WorkflowTests(unittest.TestCase):
         self.change()
         self.commit()
         result = self.run_cli("finish", "--message", "Deliver")
+        self.assertEqual(self.git("log", "-1", "--format=%s"), "Deliver")
         self.assertIn(f"method={method}", result.stdout)
         self.assertIn(f"deleted={'local-and-remote' if cleanup else 'false'}", result.stdout)
         self.assertEqual(self.git("branch", "--show-current"), "main")
@@ -230,7 +231,6 @@ class WorkflowTests(unittest.TestCase):
     def test_finish_invalid_state(self):
         self.save_settings(integration={"mergeMethod": "squash"})
         self.start()
-        self.assertIn("--message is required", self.run_cli("finish", ok=False).stderr)
         self.change()
         self.assertIn("working tree must be clean", self.run_cli("finish", "--message", "Deliver", ok=False).stderr)
         self.assertEqual(self.git("branch", "--show-current"), "feat/test")
@@ -241,7 +241,6 @@ class WorkflowTests(unittest.TestCase):
         self.start()
         self.change()
         self.commit()
-        self.assertIn("--title is required", self.run_cli("finish", ok=False).stderr)
         self.assertIn("url=https://example.invalid/pr/1", self.run_cli("finish", "--title", "Task", "--body", "Details").stdout)
         log = Path(self.env["GH_LOG"])
         self.assertIn("pr create --base main --head feat/test --title Task --body Details", log.read_text())
@@ -251,6 +250,56 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("pr create", log.read_text())
         self.assertEqual(self.git("branch", "--show-current"), "feat/test")
         self.assertEqual(self.git("config", "branch.feat/test.agentWorkflowCreated"), "true")
+
+    def test_squash_default_single_commit_subject(self):
+        self.save_settings(integration={"mergeMethod": "squash"})
+        self.start()
+        self.change()
+        self.commit()
+        self.run_cli("finish")
+        self.assertEqual(self.git("log", "-1", "--format=%s"), "Change")
+
+    def test_squash_default_multiple_commit_summary(self):
+        self.save_settings(integration={"mergeMethod": "squash"})
+        self.run_cli("start", "--branch-name", "feat/ai-harness-preflight")
+        self.change()
+        self.commit()
+        self.change("other")
+        self.commit("other")
+        self.run_cli("finish")
+        self.assertEqual(self.git("log", "-1", "--format=%s"), "feat(ai): harness preflight")
+
+    def test_squash_default_unconventional_branch(self):
+        self.save_settings(integration={"mergeMethod": "squash"})
+        self.run_cli("start", "--branch-name", "work-in-progress")
+        self.change()
+        self.commit()
+        self.change("other")
+        self.commit("other")
+        self.run_cli("finish")
+        self.assertEqual(self.git("log", "-1", "--format=%s"), "work-in-progress")
+
+    def test_merge_commit_keeps_git_default_message(self):
+        self.start()
+        self.change()
+        self.commit()
+        self.run_cli("finish")
+        self.assertEqual(self.git("log", "-1", "--format=%s"), "Merge branch 'feat/test'")
+
+    def test_pull_request_default_title(self):
+        self.stub_gh()
+        self.save_settings(integration={"mode": "pullRequest"})
+        self.run_cli("start", "--branch-name", "feat/ai-harness-preflight")
+        self.change()
+        self.commit()
+        self.run_cli("finish")
+        log = Path(self.env["GH_LOG"])
+        self.assertIn("--title Change --body", log.read_text())
+        self.change("other")
+        self.commit("other")
+        log.write_text("")
+        self.run_cli("finish")
+        self.assertIn("--title feat(ai): harness preflight --body", log.read_text())
 
     def test_finish_rechecks_authentication(self):
         self.stub_gh()

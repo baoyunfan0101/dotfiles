@@ -48,10 +48,10 @@ Push options:
 
 Finish options:
   --message MESSAGE
-      Required for squash local merge; optional for merge-commit delivery.
+      Override the derived squash message or Git's default merge-commit message.
 
   --title TITLE
-      Required for pull request delivery.
+      Override the derived pull request title.
 
   --body BODY
       Optional pull request body; mutually exclusive with --body-file.
