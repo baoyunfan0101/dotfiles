@@ -116,5 +116,7 @@ See [Project Settings](ai/project-settings.md) for all supported settings, value
 Run the regression tests with:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s ai/common/tests
+./test.sh
 ```
+
+Tests use temporary repositories, local remotes, homes, and configuration directories. Both installer modes run inside the sandbox; they do not install into your real environment or contact GitHub. The sandbox is removed on exit.
