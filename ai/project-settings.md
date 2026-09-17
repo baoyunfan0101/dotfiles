@@ -1,6 +1,6 @@
 # Project Settings
 
-Project-level agent workflow behavior is configured through:
+This reference describes project-specific behavior for `start`, `commit`, and `finish`, plus the auxiliary `push` command. Configure it in:
 
 ```text
 <repository>/.ai/project.json
@@ -9,6 +9,15 @@ Project-level agent workflow behavior is configured through:
 Settings in this file override the built-in defaults. Any omitted settings inherit their default values.
 
 `schemaVersion` is required whenever `.ai/project.json` exists.
+
+## Inspect effective settings
+
+Show the configuration after project overrides and defaults are combined, or inspect one field:
+
+```bash
+agent-project-settings effective
+agent-project-settings get git.branch.mode
+```
 
 ## Default configuration
 
@@ -42,6 +51,14 @@ Settings in this file override the built-in defaults. Any omitted settings inher
 
 ## Settings reference
 
+| Area | Purpose |
+|---|---|
+| `git.sync` | Repository synchronization during `start` and local-merge `finish`. |
+| `git.backup` | Protect local changes during `start`. |
+| `git.commit` | Commit and push policy. |
+| `git.branch` | Task-branch policy. |
+| `git.integration` | Integration strategy used by `finish`. |
+
 ### `schemaVersion`
 
 Configuration schema version.
@@ -64,7 +81,7 @@ The field is required when `.ai/project.json` exists.
 
 ### `git.sync.mode`
 
-Controls how the current branch is synchronized during `git-workflow start`.
+Controls synchronization of the current branch during `start` and the base branch during a local-merge `finish`.
 
 Default:
 
@@ -271,9 +288,15 @@ This setting applies to:
 
 When squash integration is used, the local task branch is force-deleted because its commits are not direct ancestors of the resulting squash commit.
 
-## Git integration
+## Finish integration strategy
 
-`git-workflow finish` uses the configured integration strategy for workflow-created task branches.
+The normal task-completion command is:
+
+```bash
+git-workflow finish
+```
+
+`finish` selects `localMerge` or `pullRequest` through `git.integration.mode`. These are strategies for the same lifecycle action.
 
 If the current branch was not created by `git-workflow start`, `git-workflow finish` skips the task.
 
@@ -300,7 +323,7 @@ Supported values:
 
 `git-workflow finish` derives the title from the sole task commit's subject, or from the task branch name for other commit counts. `--title` overrides it; the body is optional.
 
-Example:
+Optional PR metadata overrides:
 
 ```bash
 git-workflow finish \
@@ -329,18 +352,11 @@ Supported values:
 | `"mergeCommit"` | Merge the task branch using a merge commit. Fast-forward-only integration is not used. |
 | `"squash"` | Squash all changes from the task branch into a single commit on the base branch. |
 
-For `"mergeCommit"`, an integration message is optional. If omitted, Git generates the normal merge commit message.
-
-Example:
-
-```bash
-git-workflow finish \
-  --message "Merge project settings documentation"
-```
+For `"mergeCommit"`, Git generates the normal merge commit message unless `--message` overrides it.
 
 For `"squash"`, the message defaults to the sole task commit's subject, or to a summary derived from the task branch name. `--message` overrides it. For example, `feat/ai-harness-preflight` becomes `feat(ai): harness preflight`; names outside that convention are kept unchanged.
 
-Example:
+Optional message override for either local merge method:
 
 ```bash
 git-workflow finish \
@@ -348,25 +364,3 @@ git-workflow finish \
 ```
 
 This setting does not control how a GitHub pull request is ultimately merged when `git.integration.mode` is `"pullRequest"`.
-
-## Inspecting effective settings
-
-Show the complete configuration after project overrides have been merged with the defaults:
-
-```bash
-agent-project-settings effective
-```
-
-Show one setting:
-
-```bash
-agent-project-settings get git.branch.mode
-```
-
-For example:
-
-```bash
-agent-project-settings get git.backup.mode
-```
-
-prints the effective value of `git.backup.mode`.
