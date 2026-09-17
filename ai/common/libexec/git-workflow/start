@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+
+parse_start_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --branch-name)
+        [[ $# -ge 2 ]] || fail "missing value for --branch-name"
+        BRANCH_NAME="$2"
+        shift 2
+        ;;
+      --branch-name=*)
+        BRANCH_NAME="${1#*=}"
+        shift
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        fail "unknown option: $1"
+        ;;
+    esac
+  done
+}
+
+print_start_result() {
+  local backup_result="none"
+
+  if [[ "$BACKUP_CREATED" == true ]]; then
+    backup_result="$BACKUP_METHOD"
+  fi
+
+  printf '[git] start ok backup=%s sync=%s branch=%s base=%s created=%s\n' \
+    "$backup_result" \
+    "$SYNC_RESULT" \
+    "$WORKING_BRANCH" \
+    "$ORIGINAL_BRANCH" \
+    "$BRANCH_CREATED"
+}
+
+start() {
+  CURRENT_ACTION="start"
+  parse_start_args "$@"
+  preflight_core
+  preflight_delivery
+  require_repository
+
+  ORIGINAL_BRANCH="$(current_branch)"
+  load_start_settings
+
+  create_backup
+  sync_current_branch "$ORIGINAL_BRANCH"
+  select_working_branch
+  reapply_backup
+
+  WORKING_BRANCH="$(current_branch)"
+  print_start_result
+}
+
+start "$@"

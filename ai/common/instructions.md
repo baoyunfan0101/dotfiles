@@ -7,40 +7,35 @@
 - Use ASCII unless explicitly requested otherwise.
 - When showing Markdown containing fenced code blocks, use `~~~md` as the outer fence.
 
-## Git
+## Workflow
 
-Use `git-workflow` for all Git workflow operations; do not reproduce its Git operations manually.
+Use `git-workflow` for repository-changing tasks. Do not run workflow commands for read-only tasks or reproduce their Git operations manually.
 
-Start each task with:
+Start once before the task's first edit:
 
 ```bash
-git-workflow prepare --branch-name <candidate-branch>
+git-workflow start --branch-name <candidate-branch>
 ```
 
-Commit each atomic change with:
+Commit each atomic change by path, as often as needed:
 
 ```bash
 git-workflow commit --message "<message>" -- <paths>...
 ```
 
-Use `--all` only when all current changes belong to the same atomic commit.
-
-When the user explicitly requests a commit or push disabled by manual mode, use `--override-manual`.
-
-Finish a workflow-created task branch with:
+Finish the workflow-created task once when complete, within the user's authorized delivery scope:
 
 ```bash
-git-workflow integrate \
-  --message "<message>" \
-  --title "<title>" \
-  --body "<body>"
+git-workflow finish
 ```
 
-Follow repository naming conventions when available; otherwise use:
+Use `--all` only for one atomic change. Use `--override-manual` only for an explicit user request blocked by manual mode.
+
+Follow repository naming conventions, or default to:
 
 ```text
 branch: <type>/<area>-<description>
 commit: <type>(<area>): <summary>
 ```
 
-Surface every `[git]` result from `git-workflow` verbatim exactly once. Do not summarize or repeat it.
+Surface each `[git]` result verbatim exactly once.

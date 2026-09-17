@@ -1,6 +1,6 @@
 # Project Settings
 
-Project-level agent workflow behavior is configured through:
+This reference describes project-specific behavior for `start`, `commit`, and `finish`, plus the auxiliary `push` command. Configure it in:
 
 ```text
 <repository>/.ai/project.json
@@ -9,6 +9,15 @@ Project-level agent workflow behavior is configured through:
 Settings in this file override the built-in defaults. Any omitted settings inherit their default values.
 
 `schemaVersion` is required whenever `.ai/project.json` exists.
+
+## Inspect effective settings
+
+Show the configuration after project overrides and defaults are combined, or inspect one field:
+
+```bash
+agent-project-settings effective
+agent-project-settings get git.branch.mode
+```
 
 ## Default configuration
 
@@ -42,6 +51,14 @@ Settings in this file override the built-in defaults. Any omitted settings inher
 
 ## Settings reference
 
+| Area | Purpose |
+|---|---|
+| `git.sync` | Repository synchronization during `start` and local-merge `finish`. |
+| `git.backup` | Protect local changes during `start`. |
+| `git.commit` | Commit and push policy. |
+| `git.branch` | Task-branch policy. |
+| `git.integration` | Integration strategy used by `finish`. |
+
 ### `schemaVersion`
 
 Configuration schema version.
@@ -64,7 +81,7 @@ The field is required when `.ai/project.json` exists.
 
 ### `git.sync.mode`
 
-Controls how the current branch is synchronized during workflow preparation.
+Controls synchronization of the current branch during `start` and the base branch during a local-merge `finish`.
 
 Default:
 
@@ -108,7 +125,7 @@ This setting has no effect when `git.sync.mode` is `"none"` or `"fetch"`.
 
 ## Git backup
 
-Before synchronization or branch selection, `git-workflow prepare` can preserve local changes and then restore them afterward.
+Before synchronization or branch selection, `git-workflow start` can preserve local changes and then restore them afterward.
 
 ### `git.backup.mode`
 
@@ -146,7 +163,7 @@ Supported values:
 | Value | Meaning |
 |---|---|
 | `"stash"` | Store the backup as a Git stash. The backup stash remains available after the changes are reapplied. |
-| `"commit"` | Store the backup as a commit referenced under `refs/agent-workflow/backups/`. A temporary stash is used only to transport the working-tree changes while the workflow prepares the repository. |
+| `"commit"` | Store the backup as a commit referenced under `refs/agent-workflow/backups/`. A temporary stash transports working-tree changes during `git-workflow start`. |
 
 This setting has no effect when:
 
@@ -194,7 +211,7 @@ A manually overridden commit is not automatically pushed.
 
 ### `git.branch.mode`
 
-Controls whether workflow preparation creates a task branch.
+Controls whether `git-workflow start` creates a task branch.
 
 Default:
 
@@ -207,16 +224,16 @@ Supported values:
 | Value | Meaning |
 |---|---|
 | `"current"` | Continue working on the current branch. Never create a task branch automatically. |
-| `"alwaysCreate"` | Always create a new task branch during workflow preparation. |
+| `"alwaysCreate"` | Always create a new task branch during `git-workflow start`. |
 | `"fromBase"` | Create a new task branch only when the current branch is listed in `git.branch.baseBranches`. Otherwise continue on the current branch. |
 
-When the selected mode requires a new branch, `git-workflow prepare` must receive a candidate branch name:
+When the selected mode requires a new branch, `git-workflow start` must receive a candidate branch name:
 
 ```bash
-git-workflow prepare --branch-name <candidate-branch>
+git-workflow start --branch-name <candidate-branch>
 ```
 
-Branches created by the workflow are marked with Git configuration metadata so that they can later be recognized and integrated by `git-workflow integrate`.
+Branches created by `git-workflow start` are marked with Git configuration metadata so that `git-workflow finish` can recognize the task and its base branch.
 
 ### `git.branch.baseBranches`
 
@@ -271,17 +288,23 @@ This setting applies to:
 
 When squash integration is used, the local task branch is force-deleted because its commits are not direct ancestors of the resulting squash commit.
 
-## Git integration
+## Finish integration strategy
 
-Only branches created and marked by the workflow are automatically integrated.
+The normal task-completion command is:
 
-If the current branch was not created by `git-workflow prepare`, `git-workflow integrate` skips integration.
+```bash
+git-workflow finish
+```
 
-The working tree must be clean before integration.
+`finish` selects `localMerge` or `pullRequest` through `git.integration.mode`. These are strategies for the same lifecycle action.
+
+If the current branch was not created by `git-workflow start`, `git-workflow finish` skips the task.
+
+The working tree must be clean when `finish` has a task to deliver.
 
 ### `git.integration.mode`
 
-Controls how a workflow-created task branch is integrated.
+Selects the integration strategy used by `git-workflow finish`.
 
 Default:
 
@@ -296,14 +319,14 @@ Supported values:
 | `"localMerge"` | Check out the original base branch, synchronize it, integrate the task branch locally, and push the resulting base branch. |
 | `"pullRequest"` | Push the task branch and create or reuse a GitHub pull request targeting the original base branch. |
 
-`"pullRequest"` mode requires the GitHub CLI (`gh`).
+`"pullRequest"` mode requires the GitHub CLI (`gh`) and authentication at `start` and when `finish` has a workflow-created task to deliver. A skipped `finish` does not require GitHub dependencies.
 
-A pull request title must be supplied to `git-workflow integrate`.
+`git-workflow finish` derives the title from the sole task commit's subject, or from the task branch name for other commit counts. `--title` overrides it; the body is optional.
 
-Example:
+Optional PR metadata overrides:
 
 ```bash
-git-workflow integrate \
+git-workflow finish \
   --title "Add project settings documentation" \
   --body "Document all supported project settings."
 ```
@@ -329,44 +352,15 @@ Supported values:
 | `"mergeCommit"` | Merge the task branch using a merge commit. Fast-forward-only integration is not used. |
 | `"squash"` | Squash all changes from the task branch into a single commit on the base branch. |
 
-For `"mergeCommit"`, an integration message is optional. If omitted, Git generates the normal merge commit message.
+For `"mergeCommit"`, Git generates the normal merge commit message unless `--message` overrides it.
 
-Example:
+For `"squash"`, the message defaults to the sole task commit's subject, or to a summary derived from the task branch name. `--message` overrides it. For example, `feat/ai-harness-preflight` becomes `feat(ai): harness preflight`; names outside that convention are kept unchanged.
 
-```bash
-git-workflow integrate \
-  --message "Merge project settings documentation"
-```
-
-For `"squash"`, an integration message is required because the workflow must create the resulting squash commit.
-
-Example:
+Optional message override for either local merge method:
 
 ```bash
-git-workflow integrate \
+git-workflow finish \
   --message "docs(ai): document project settings"
 ```
 
 This setting does not control how a GitHub pull request is ultimately merged when `git.integration.mode` is `"pullRequest"`.
-
-## Inspecting effective settings
-
-Show the complete configuration after project overrides have been merged with the defaults:
-
-```bash
-agent-project-settings effective
-```
-
-Show one setting:
-
-```bash
-agent-project-settings get git.branch.mode
-```
-
-For example:
-
-```bash
-agent-project-settings get git.backup.mode
-```
-
-prints the effective value of `git.backup.mode`.
