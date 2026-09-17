@@ -216,7 +216,7 @@ When the selected mode requires a new branch, `git-workflow start` must receive 
 git-workflow start --branch-name <candidate-branch>
 ```
 
-Branches created by the workflow are marked with Git configuration metadata so that they can later be recognized and integrated by `git-workflow finish`.
+Branches created by `git-workflow start` are marked with Git configuration metadata so that `git-workflow finish` can recognize the task and its base branch.
 
 ### `git.branch.baseBranches`
 
@@ -273,15 +273,15 @@ When squash integration is used, the local task branch is force-deleted because 
 
 ## Git integration
 
-Only branches created and marked by the workflow are automatically integrated.
+`git-workflow finish` uses the configured integration strategy for workflow-created task branches.
 
-If the current branch was not created by `git-workflow start`, `git-workflow finish` skips integration.
+If the current branch was not created by `git-workflow start`, `git-workflow finish` skips the task.
 
-The working tree must be clean before integration.
+The working tree must be clean when `finish` has a task to deliver.
 
 ### `git.integration.mode`
 
-Controls how a workflow-created task branch is integrated.
+Selects the integration strategy used by `git-workflow finish`.
 
 Default:
 

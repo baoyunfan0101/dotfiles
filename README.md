@@ -90,7 +90,7 @@ Read-only tasks do not run workflow commands. Repository-changing tasks use:
 |---|---|
 | `git-workflow start --branch-name <name>` | Once before the first edit; begins the task. |
 | `git-workflow commit --message "<message>" -- <paths>...` | For each atomic change; automatic mode also pushes. |
-| `git-workflow finish [options]` | Once when complete; delivers through local merge or a pull request according to settings and user authorization. |
+| `git-workflow finish` | Once when complete; finishes and delivers the task according to configuration and user authorization. |
 | `git-workflow push` | Auxiliary explicit push, such as manual mode or recovery. |
 
 The normal lifecycle is `start -> commit* -> finish`, with zero or more commits and at most one finish. Run `git-workflow --help` for options.

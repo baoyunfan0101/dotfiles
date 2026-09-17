@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -79,7 +80,9 @@ class WorkflowTests(unittest.TestCase):
         self.env["GH_LOG"] = str(self.root / "gh.log")
 
     def test_command_help_and_dispatch(self):
-        self.assertIn("git-workflow start", self.run_cli("--help").stdout)
+        help_text = self.run_cli("--help").stdout
+        self.assertEqual(set(re.findall(r"^  ([a-z]+)$", help_text, re.MULTILINE)),
+                         {"start", "commit", "finish", "push"})
         for action in ("start", "commit", "finish", "push"):
             self.assertIn("Usage:", self.run_cli(action, "--help").stdout)
             self.assertIn(f"[git] {action} error", self.run_cli(action, "--invalid", ok=False).stderr)
