@@ -3,9 +3,10 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
+
+from sandbox import isolated_environment
 
 
 COMMON = Path(__file__).resolve().parents[1]
@@ -23,10 +24,10 @@ class WorkflowTests(unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         (self.bin / "agent-project-settings").symlink_to(COMMON / "bin/project-settings")
-        self.env = {**os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}",
-                    "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
-                    "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
-                    "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.invalid"}
+        self.env = isolated_environment(self.root)
+        self.env["PATH"] = f"{self.bin}:{self.env['PATH']}"
+        shutil.copyfile(COMMON / "tests/stubs/gh", self.bin / "gh")
+        (self.bin / "gh").chmod(0o755)
         self.git("init", "-q", "-b", "main")
         self.git("init", "-q", "--bare", str(self.remote))
         self.git("remote", "add", "origin", str(self.remote))
@@ -92,15 +93,20 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn("Usage:", self.run_cli("--help", executable=path).stdout)
 
     def check_install(self, mode):
-        destination = self.root / "installed home"
-        install_env = {**self.env, "HOME": str(destination),
-                       "CODEX_HOME": str(destination / ".codex"),
-                       "XDG_CONFIG_HOME": str(destination / ".config"),
-                       "XDG_STATE_HOME": str(destination / ".local/state")}
+        install_env = isolated_environment(self.root / "installed environment")
+        install_env["PATH"] = self.env["PATH"]
+        destination = Path(install_env["HOME"])
+        self.assertIn(self.root, destination.parents)
         result = subprocess.run([str(COMMON.parent / "install.sh"), "--agents", "codex", mode],
                                 env=install_env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.env["PATH"] = f"{destination / '.local/bin'}:{os.environ['PATH']}"
+        manifests = list(Path(install_env["XDG_STATE_HOME"]).glob("dotfiles/ai/*.manifest"))
+        self.assertEqual({path.name for path in manifests}, {"common.manifest", "codex.manifest"})
+        for manifest in manifests:
+            for target in manifest.read_text().splitlines():
+                self.assertIn(destination, Path(target).parents)
+                self.assertTrue(Path(target).exists())
+        self.env = {**install_env, "PATH": f"{destination / '.local/bin'}:{install_env['PATH']}"}
         installed = destination / ".local/bin/git-workflow"
         self.assertIn("[git] start ok", self.run_cli("start", "--branch-name", "feat/test", executable=installed).stdout)
         self.change()

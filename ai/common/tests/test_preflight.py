@@ -1,5 +1,4 @@
 import json
-import os
 from pathlib import Path
 import shlex
 import shutil
@@ -7,6 +6,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+
+from sandbox import isolated_environment
 
 
 COMMON = Path(__file__).resolve().parents[1]
@@ -24,15 +25,7 @@ class PreflightTests(unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.log = self.root / "git.log"
-        self.env = {
-            **os.environ,
-            "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_CONFIG_GLOBAL": os.devnull,
-            "GIT_AUTHOR_NAME": "Test",
-            "GIT_AUTHOR_EMAIL": "test@example.invalid",
-            "GIT_COMMITTER_NAME": "Test",
-            "GIT_COMMITTER_EMAIL": "test@example.invalid",
-        }
+        self.env = isolated_environment(self.root)
         self.git("init", "-q", "-b", "main")
         (self.repo / "tracked").write_text("original\n")
         self.configure("localMerge")
@@ -116,7 +109,7 @@ class PreflightTests(unittest.TestCase):
         for command in ("prepare", "integrate"):
             result = subprocess.run(
                 [BASH, str(COMMON / "bin/git-workflow"), command],
-                cwd=self.repo, capture_output=True, text=True,
+                cwd=self.repo, env=self.env, capture_output=True, text=True,
             )
             self.assertEqual(result.returncode, 1)
             self.assertIn(f'unknown command: {command}', result.stderr)
