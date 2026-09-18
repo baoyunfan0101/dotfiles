@@ -132,7 +132,7 @@ def validate_structure(value, schema, path=""):
 
         if isinstance(expected, dict):
             validate_structure(item, expected, current_path)
-        elif not isinstance(item, expected):
+        elif type(item) is not expected:
             fail(f"{current_path} has an invalid type")
 
 
@@ -322,18 +322,22 @@ def print_value(value):
         print(value)
 
 
-def usage():
+def usage(file=sys.stderr):
     print(
         "Usage:\n"
         "  agent-project effective\n"
         "  agent-project get <path>\n"
         "  agent-project set <path> <value>\n"
         "  agent-project unset <path>",
-        file=sys.stderr,
+        file=file,
     )
 
 
 def main():
+    if len(sys.argv) == 2 and sys.argv[1] in {"-h", "--help"}:
+        usage(sys.stdout)
+        return
+
     if len(sys.argv) == 2 and sys.argv[1] == "effective":
         print(json.dumps(effective_settings(load_overrides()), indent=2))
         return

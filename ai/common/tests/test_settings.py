@@ -35,6 +35,12 @@ class SettingsTests(unittest.TestCase):
         self.config.parent.mkdir(parents=True, exist_ok=True)
         self.config.write_text(json.dumps(config))
 
+    def test_help(self):
+        result = self.run_project("--help")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for command in ("effective", "get <path>", "set <path> <value>", "unset <path>"):
+            self.assertIn(command, result.stdout)
+
     def test_defaults_and_partial_overrides(self):
         result = self.run_project("effective")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -122,6 +128,7 @@ class SettingsTests(unittest.TestCase):
     def test_invalid_settings(self):
         for config, error in (
             ({}, "schemaVersion is required"),
+            ({"schemaVersion": True}, "invalid type"),
             ({"schemaVersion": 2}, "unsupported schemaVersion"),
             ({"schemaVersion": 1, "unknown": True}, "unknown setting"),
             ({"schemaVersion": 1, "git": {"commit": {"mode": "bad"}}}, "must be one of"),
