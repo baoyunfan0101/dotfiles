@@ -136,6 +136,40 @@ class PreflightTests(unittest.TestCase):
         self.assert_blocked("gh", "command not found", "git.integration.mode:pullRequest",
                             "install gh and ensure it is on PATH")
 
+    def test_disabled_workflow_preserves_repository_and_never_calls_gh(self):
+        marker = self.root / "gh-called"
+        self.stub("gh", f'printf called > {shlex.quote(str(marker))}; exit 1')
+        (self.repo / "tracked").write_text("changed\n")
+        (self.repo / "untracked").write_text("untracked\n")
+        config = self.repo / ".ai/project.json"
+
+        for enabled in (None, False):
+            settings = {
+                "schemaVersion": 1,
+                "git": {"integration": {"mode": "pullRequest"}},
+            }
+            if enabled is not None:
+                settings["workflow"] = {"enabled": enabled}
+            config.write_text(json.dumps(settings))
+            before = {str(p.relative_to(self.repo)): p.read_bytes()
+                      for p in self.repo.rglob("*") if p.is_file()}
+
+            for action in ("start", "commit", "finish", "push"):
+                with self.subTest(enabled=enabled, action=action):
+                    result = self.run_action(action)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout,
+                                     f"[git] {action} skip reason=workflow-disabled\n")
+                    self.assertEqual(result.stderr, "")
+                    self.assertFalse(marker.exists())
+                    after = {str(p.relative_to(self.repo)): p.read_bytes()
+                             for p in self.repo.rglob("*") if p.is_file()}
+                    self.assertEqual(before, after)
+
+        allowed = {"rev-parse --is-inside-work-tree", "rev-parse --show-toplevel"}
+        calls = self.log.read_text().splitlines()
+        self.assertTrue(all(call in allowed for call in calls), calls)
+
     def test_pull_request_without_authentication(self):
         self.configure("pullRequest", sync="fetch")
         self.stub("gh", 'echo "auth noise" >&2; exit 1')
