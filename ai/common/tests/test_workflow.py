@@ -131,6 +131,14 @@ class WorkflowTests(unittest.TestCase):
                 self.assertIn(destination, Path(target).parents)
                 self.assertTrue(Path(target).exists())
         self.env = {**install_env, "PATH": f"{destination / '.local/bin'}:{install_env['PATH']}"}
+        installed_project = destination / ".local/bin/agent-project"
+        self.assertTrue(installed_project.exists())
+        self.assertFalse((destination / ".local/bin/agent-project-settings").exists())
+        self.assertIn(
+            "agent-project set",
+            self.run_cli("--help", executable=installed_project).stdout,
+        )
+
         installed = destination / ".local/bin/git-workflow"
         self.assertIn("[git] start ok", self.run_cli("start", "--branch-name", "feat/test", executable=installed).stdout)
         self.change()
