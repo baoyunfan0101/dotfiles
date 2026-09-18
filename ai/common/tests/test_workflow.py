@@ -24,7 +24,7 @@ class WorkflowTests(unittest.TestCase):
         self.repo.mkdir()
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        (self.bin / "agent-project-settings").symlink_to(COMMON / "bin/project-settings")
+        (self.bin / "agent-project").symlink_to(COMMON / "bin/agent-project")
         self.env = isolated_environment(self.root)
         self.env["PATH"] = f"{self.bin}:{self.env['PATH']}"
         shutil.copyfile(COMMON / "tests/stubs/gh", self.bin / "gh")

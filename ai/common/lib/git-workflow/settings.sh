@@ -2,7 +2,7 @@ COMMIT_MODE=""
 INTEGRATION_MODE=""
 
 setting() {
-  agent-project-settings get "$1"
+  agent-project get "$1"
 }
 
 load_start_settings() {

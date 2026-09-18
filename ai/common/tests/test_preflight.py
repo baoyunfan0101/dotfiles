@@ -37,7 +37,7 @@ class PreflightTests(unittest.TestCase):
         (self.bin / "date").symlink_to(shutil.which("date"))
         for command in ("bash", "dirname", "readlink", "cat"):
             (self.bin / command).symlink_to(shutil.which(command))
-        (self.bin / "agent-project-settings").symlink_to(COMMON / "bin/project-settings")
+        (self.bin / "agent-project").symlink_to(COMMON / "bin/agent-project")
 
     def git(self, *args):
         return subprocess.check_output(
@@ -139,16 +139,16 @@ class PreflightTests(unittest.TestCase):
                 (self.repo / ".ai/project.json").write_text(content)
                 for action in ("start", "commit", "finish", "push"):
                     self.assert_blocked("project-settings", "configuration invalid", "core",
-                                        "fix .ai/project.json and run agent-project-settings effective", action)
+                                        "fix .ai/project.json and run agent-project effective", action)
 
     def test_missing_core_commands(self):
-        for command in ("git", "python3", "agent-project-settings"):
+        for command in ("git", "python3", "agent-project"):
             with self.subTest(command=command):
                 path = self.bin / command
                 hidden = self.root / command
                 path.rename(hidden)
                 try:
-                    fix = ("re-run the dotfiles AI installer" if command == "agent-project-settings"
+                    fix = ("re-run the dotfiles AI installer" if command == "agent-project"
                            else f"install {command} and ensure it is on PATH")
                     for action in ("start", "commit", "finish", "push"):
                         self.assert_blocked(command, "command not found", "core", fix, action)

@@ -15,8 +15,8 @@ Settings in this file override the built-in defaults. Any omitted settings inher
 Show the configuration after project overrides and defaults are combined, or inspect one field:
 
 ```bash
-agent-project-settings effective
-agent-project-settings get git.branch.mode
+agent-project effective
+agent-project get git.branch.mode
 ```
 
 ## Default configuration

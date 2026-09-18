@@ -59,7 +59,7 @@ Run `start` once before editing, `commit` zero or more times, and `finish` at mo
 Inspect the effective configuration:
 
 ```bash
-agent-project-settings effective
+agent-project effective
 ```
 
 See [Project Settings](ai/project-settings.md) for the complete configuration reference.

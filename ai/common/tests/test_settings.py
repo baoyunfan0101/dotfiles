@@ -8,7 +8,7 @@ import unittest
 from sandbox import isolated_environment
 
 
-SETTINGS = Path(__file__).resolve().parents[1] / "bin/project-settings"
+PROJECT = Path(__file__).resolve().parents[1] / "bin/agent-project"
 
 
 class SettingsTests(unittest.TestCase):
@@ -24,7 +24,7 @@ class SettingsTests(unittest.TestCase):
         self.config.parent.mkdir()
 
     def run_settings(self, *arguments):
-        return subprocess.run([sys.executable, str(SETTINGS), *arguments],
+        return subprocess.run([sys.executable, str(PROJECT), *arguments],
                               cwd=self.repo, env=self.env, capture_output=True, text=True)
 
     def test_defaults_and_partial_overrides(self):

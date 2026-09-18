@@ -13,11 +13,11 @@ preflight_command() {
 preflight_core() {
   preflight_command git core "install git and ensure it is on PATH"
   preflight_command python3 core "install python3 and ensure it is on PATH"
-  preflight_command agent-project-settings core "re-run the dotfiles AI installer"
+  preflight_command agent-project core "re-run the dotfiles AI installer"
 
   if ! INTEGRATION_MODE="$(setting git.integration.mode 2>/dev/null)"; then
     preflight_error project-settings "configuration invalid" core \
-      "fix .ai/project.json and run agent-project-settings effective"
+      "fix .ai/project.json and run agent-project effective"
   fi
 }
 
