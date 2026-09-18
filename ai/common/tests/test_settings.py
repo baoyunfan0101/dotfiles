@@ -1,9 +1,13 @@
+from contextlib import redirect_stderr
+import io
 import json
 from pathlib import Path
+import runpy
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from sandbox import isolated_environment
 
@@ -125,10 +129,72 @@ class SettingsTests(unittest.TestCase):
         self.assertIn("cannot be unset", result.stderr)
         self.assertEqual(json.loads(self.config.read_text()), {"schemaVersion": 1})
 
+    def test_invalid_mutations_preserve_existing_overrides(self):
+        self.write_config({
+            "schemaVersion": 1,
+            "workflow": {"enabled": True},
+            "git": {"branch": {"mode": "current", "baseBranches": []}},
+        })
+        before = self.config.read_bytes()
+        for arguments in (
+            ("set", "workflow.enabled", "yes"),
+            ("set", "git.integration.mode", "invalid"),
+            ("set", "git.branch.baseBranches", '["main",1]'),
+            ("set", "git.branch.baseBranches", '["main","main"]'),
+            ("set", "git.branch.mode", "fromBase"),
+            ("unset", "git.branch.mode"),
+        ):
+            with self.subTest(arguments=arguments):
+                result = self.run_project(*arguments)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.config.read_bytes(), before)
+                self.assertEqual(list(self.config.parent.iterdir()), [self.config])
+
+    def test_failed_atomic_replace_preserves_file_and_removes_temporary(self):
+        self.write_config({"schemaVersion": 1})
+        before = self.config.read_bytes()
+        writer = runpy.run_path(str(PROJECT))["write_overrides"]
+
+        def reject_replace(source, destination):
+            self.assertEqual(source.parent, self.config.parent)
+            self.assertEqual(destination, self.config)
+            self.assertEqual(json.loads(source.read_text()), {
+                "schemaVersion": 1, "workflow": {"enabled": True},
+            })
+            self.assertEqual(self.config.read_bytes(), before)
+            raise OSError("replacement failed")
+
+        errors = io.StringIO()
+        with mock.patch.dict(writer.__globals__, {"config_path": lambda: self.config}):
+            with mock.patch("os.replace", side_effect=reject_replace) as replace:
+                with redirect_stderr(errors), self.assertRaises(SystemExit) as failure:
+                    writer({"schemaVersion": 1, "workflow": {"enabled": True}})
+        self.assertEqual(failure.exception.code, 1)
+        replace.assert_called_once()
+        self.assertIn("cannot write", errors.getvalue())
+        self.assertEqual(self.config.read_bytes(), before)
+        self.assertEqual(list(self.config.parent.iterdir()), [self.config])
+
+    def test_config_directory_creation_failure_is_reported(self):
+        self.config.parent.write_text("not a directory\n")
+        result = self.run_project("set", "workflow.enabled", "true")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("cannot write", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(self.config.parent.read_text(), "not a directory\n")
+
+    def test_unset_without_configuration_does_not_create_file(self):
+        result = self.run_project("unset", "workflow.enabled")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("reason=not-overridden", result.stdout)
+        self.assertFalse(self.config.parent.exists())
+
     def test_invalid_settings(self):
         for config, error in (
             ({}, "schemaVersion is required"),
             ({"schemaVersion": True}, "invalid type"),
+            ({"schemaVersion": 1, "workflow": {"enabled": 1}}, "invalid type"),
+            ({"schemaVersion": 1, "workflow": {"enabled": "true"}}, "invalid type"),
             ({"schemaVersion": 2}, "unsupported schemaVersion"),
             ({"schemaVersion": 1, "unknown": True}, "unknown setting"),
             ({"schemaVersion": 1, "git": {"commit": {"mode": "bad"}}}, "must be one of"),

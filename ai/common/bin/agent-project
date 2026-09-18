@@ -292,10 +292,10 @@ def unset_override(overrides, path):
 
 def write_overrides(overrides):
     path = config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
 
     temporary = None
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
