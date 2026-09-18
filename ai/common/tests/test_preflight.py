@@ -96,9 +96,9 @@ class PreflightTests(unittest.TestCase):
                  for p in self.repo.rglob("*") if p.is_file()}
         self.assertEqual(before, after)
         calls = self.log.read_text().splitlines() if self.log.exists() else []
-        allowed = {"rev-parse --show-toplevel"}
+        allowed = {"rev-parse --show-toplevel", "rev-parse --is-inside-work-tree"}
         if action == "finish":
-            allowed.update({"rev-parse --is-inside-work-tree", "symbolic-ref --quiet --short HEAD",
+            allowed.update({"symbolic-ref --quiet --short HEAD",
                             "config --get branch.feat/test.agentWorkflowBase",
                             "config --bool --get branch.feat/test.agentWorkflowCreated"})
         self.assertTrue(all(call in allowed for call in calls), calls)

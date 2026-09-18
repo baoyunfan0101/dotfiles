@@ -1,6 +1,6 @@
 require_repository() {
   require_command git
-  require_command agent-project-settings
+  require_command agent-project
 
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     fail "current directory is not inside a Git worktree"
