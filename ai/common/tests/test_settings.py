@@ -39,6 +39,7 @@ class SettingsTests(unittest.TestCase):
         result = self.run_project("effective")
         self.assertEqual(result.returncode, 0, result.stderr)
         defaults = json.loads(result.stdout)
+        self.assertIs(defaults["workflow"]["enabled"], False)
         self.assertEqual(defaults["git"]["integration"]["mode"], "localMerge")
 
         self.write_config({"schemaVersion": 1, "git": {"commit": {"mode": "manual"}}})
@@ -47,6 +48,22 @@ class SettingsTests(unittest.TestCase):
         defaults["git"]["commit"]["mode"] = "manual"
         self.assertEqual(json.loads(result.stdout), defaults)
         self.assertEqual(self.run_project("get", "git.commit.mode").stdout, "manual\n")
+
+    def test_workflow_disabled_by_default_and_can_be_enabled(self):
+        self.assertEqual(self.run_project("get", "workflow.enabled").stdout, "false\n")
+
+        result = self.run_project("set", "workflow.enabled", "true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.run_project("get", "workflow.enabled").stdout, "true\n")
+        self.assertEqual(
+            json.loads(self.config.read_text()),
+            {"schemaVersion": 1, "workflow": {"enabled": True}},
+        )
+
+        result = self.run_project("unset", "workflow.enabled")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.run_project("get", "workflow.enabled").stdout, "false\n")
+        self.assertEqual(json.loads(self.config.read_text()), {"schemaVersion": 1})
 
     def test_set_creates_minimal_override_and_unset_restores_default(self):
         result = self.run_project("set", "git.commit.mode", "manual")

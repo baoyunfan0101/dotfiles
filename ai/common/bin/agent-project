@@ -13,6 +13,9 @@ SCHEMA_VERSION = 1
 
 DEFAULT_SETTINGS = {
     "schemaVersion": SCHEMA_VERSION,
+    "workflow": {
+        "enabled": False,
+    },
     "git": {
         "sync": {
             "mode": "update",
@@ -39,6 +42,9 @@ DEFAULT_SETTINGS = {
 
 SCHEMA = {
     "schemaVersion": int,
+    "workflow": {
+        "enabled": bool,
+    },
     "git": {
         "sync": {
             "mode": str,

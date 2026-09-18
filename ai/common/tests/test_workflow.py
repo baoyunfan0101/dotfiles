@@ -45,7 +45,12 @@ class WorkflowTests(unittest.TestCase):
     def settings(self, **values):
         path = self.repo / ".ai/project.json"
         path.parent.mkdir(exist_ok=True)
-        config = json.loads(path.read_text()) if path.exists() else {"schemaVersion": 1, "git": {}}
+        config = json.loads(path.read_text()) if path.exists() else {
+            "schemaVersion": 1,
+            "workflow": {"enabled": True},
+            "git": {},
+        }
+        config.setdefault("workflow", {})["enabled"] = True
         for key, value in values.items():
             config["git"].setdefault(key, {}).update(value)
         path.write_text(json.dumps(config))
@@ -87,6 +92,22 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn("Usage:", self.run_cli(action, "--help").stdout)
             self.assertIn(f"[git] {action} error", self.run_cli(action, "--invalid", ok=False).stderr)
         self.assertIn("no-workflow-created-branch", self.run_cli("finish").stdout)
+
+    def test_disabled_or_unconfigured_project_skips_workflow(self):
+        path = self.repo / ".ai/project.json"
+        path.unlink()
+
+        for action, arguments in (
+            ("start", ("--branch-name", "feat/test")),
+            ("commit", ("--message", "Change", "--all")),
+            ("push", ()),
+            ("finish", ()),
+        ):
+            result = self.run_cli(action, *arguments)
+            self.assertEqual(
+                result.stdout,
+                f"[git] {action} skip reason=workflow-disabled\n",
+            )
 
     def test_command_executables(self):
         for action in ("start", "commit", "finish", "push"):

@@ -54,6 +54,7 @@ class PreflightTests(unittest.TestCase):
         directory.mkdir(exist_ok=True)
         (directory / "project.json").write_text(json.dumps({
             "schemaVersion": 1,
+            "workflow": {"enabled": True},
             "git": {"sync": {"mode": sync}, "integration": {"mode": mode}},
         }))
 
@@ -113,6 +114,22 @@ class PreflightTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 1)
             self.assertIn(f'unknown command: {command}', result.stderr)
+
+    def test_disabled_workflow_skips_before_delivery_preflight(self):
+        directory = self.repo / ".ai"
+        (directory / "project.json").write_text(json.dumps({
+            "schemaVersion": 1,
+            "workflow": {"enabled": False},
+            "git": {"integration": {"mode": "pullRequest"}},
+        }))
+
+        for action in ("start", "commit", "finish", "push"):
+            result = self.run_action(action)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout,
+                f"[git] {action} skip reason=workflow-disabled\n",
+            )
 
     def test_pull_request_without_gh(self):
         self.configure("pullRequest", sync="fetch")

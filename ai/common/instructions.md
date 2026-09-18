@@ -17,6 +17,8 @@ Start once before the task's first edit:
 git-workflow start --branch-name <candidate-branch>
 ```
 
+If `start` reports `[git] start skip reason=workflow-disabled`, do not use further `git-workflow` commands for that task.
+
 Commit each atomic change by path, as often as needed:
 
 ```bash
