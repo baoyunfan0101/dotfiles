@@ -1,29 +1,48 @@
 # Project Settings
 
-This reference describes project-specific behavior for `start`, `commit`, and `finish`, plus the auxiliary `push` command. Configure it in:
+This reference describes project-specific behavior for `start`, `commit`, and `finish`, plus the auxiliary `push` command. Project overrides are stored in:
 
 ```text
 <repository>/.ai/project.json
 ```
 
-Settings in this file override the built-in defaults. Any omitted settings inherit their default values.
+The file is optional. Missing settings inherit built-in defaults, and the workflow is disabled by default. `schemaVersion` is required whenever `.ai/project.json` exists.
 
-`schemaVersion` is required whenever `.ai/project.json` exists.
+## Manage project settings
 
-## Inspect effective settings
-
-Show the configuration after project overrides and defaults are combined, or inspect one field:
+Show the complete effective configuration or one value:
 
 ```bash
 agent-project effective
+agent-project get workflow.enabled
 agent-project get git.branch.mode
 ```
+
+Set an override:
+
+```bash
+agent-project set workflow.enabled true
+agent-project set git.integration.mode pullRequest
+```
+
+`set` validates the value against the project schema and creates `.ai/project.json` when needed.
+
+Remove an override and return to its built-in default:
+
+```bash
+agent-project unset git.integration.mode
+```
+
+`project.json` stores only explicit overrides plus `schemaVersion`; `effective` shows the result after merging those overrides with built-in defaults.
 
 ## Default configuration
 
 ```json
 {
   "schemaVersion": 1,
+  "workflow": {
+    "enabled": false
+  },
   "git": {
     "sync": {
       "mode": "update",
@@ -53,6 +72,7 @@ agent-project get git.branch.mode
 
 | Area | Purpose |
 |---|---|
+| `workflow` | Whether this repository uses `git-workflow`. |
 | `git.sync` | Repository synchronization during `start` and local-merge `finish`. |
 | `git.backup` | Protect local changes during `start`. |
 | `git.commit` | Commit and push policy. |
@@ -76,6 +96,45 @@ Supported values:
 | `1` | Current project settings schema. |
 
 The field is required when `.ai/project.json` exists.
+
+## Workflow activation
+
+### `workflow.enabled`
+
+Controls whether the repository uses `git-workflow`.
+
+Default:
+
+```json
+false
+```
+
+Supported values:
+
+| Value | Meaning |
+|---|---|
+| `false` | Workflow commands skip without performing task workflow operations. |
+| `true` | Repository-changing tasks use the configured `start -> commit* -> finish` lifecycle. |
+
+Enable the workflow for the current repository:
+
+```bash
+agent-project set workflow.enabled true
+```
+
+Disable it explicitly:
+
+```bash
+agent-project set workflow.enabled false
+```
+
+Remove the project override and return to the default `false`:
+
+```bash
+agent-project unset workflow.enabled
+```
+
+When disabled, `git-workflow start`, `commit`, `push`, and `finish` return `skip reason=workflow-disabled`. Delivery-specific checks such as GitHub CLI authentication are not performed.
 
 ## Git synchronization
 

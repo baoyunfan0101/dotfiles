@@ -6,20 +6,22 @@ A personal development environment and lightweight harness for AI coding agents.
 
 ```text
 dotfiles/
-  README.md                    Project entry point
-  test.sh                      Isolated repository tests
+  .ai/
+    project.json                Workflow overrides for this repository
+  README.md                     Project entry point
+  test.sh                       Isolated repository tests
   ai/
-    install.sh                 Installer entry point
-    install/                   Installer helpers
-    project-settings.md        Configuration reference
-    common/                    Shared agent workflow and runtime
-      module.sh                Managed file declarations
-      instructions.md          Minimal agent contract
-      bin/                     Public command entry points
-      libexec/git-workflow/     Command implementations
-      lib/git-workflow/         Shared workflow libraries
-      tests/                   Regression tests
-    codex/                     Codex configuration and skills
+    install.sh                  Installer entry point
+    install/                    Installer helpers
+    project-settings.md         Configuration reference
+    common/                     Shared agent workflow and runtime
+      module.sh                 Managed file declarations
+      instructions.md           Minimal agent contract
+      bin/                      Public command entry points
+      libexec/git-workflow/      Command implementations
+      lib/git-workflow/          Shared workflow libraries
+      tests/                    Regression tests
+    codex/                      Codex configuration and skills
 ```
 
 ## Quick Start
@@ -38,6 +40,10 @@ Test the current checkout in isolation:
 
 ## AI Workflow
 
+Installing dotfiles makes the workflow available globally, but each repository decides whether to use it. The built-in default is `workflow.enabled = false`.
+
+For an enabled repository:
+
 ```text
 Read-only task           -> no workflow command
 Repository-changing task -> start -> edit -> commit* -> finish
@@ -50,17 +56,34 @@ Repository-changing task -> start -> edit -> commit* -> finish
 | `git-workflow finish` | Finish and deliver the task according to configuration and user authorization. |
 | `git-workflow push` | Auxiliary explicit push. |
 
-Run `start` once before editing, `commit` zero or more times, and `finish` at most once when complete. `push` is not a required lifecycle step. See `git-workflow --help` for command options.
+Run `start` once before editing, `commit` zero or more times, and `finish` at most once when complete. `push` is not a required lifecycle step. If `start` reports `workflow-disabled`, no further workflow commands are used for that task. See `git-workflow --help` for command options.
 
 ## Project Configuration
 
-`<repository>/.ai/project.json` controls project-specific behavior. Omitted settings inherit built-in defaults.
+Project overrides are stored in:
 
-Inspect the effective configuration:
+```text
+<repository>/.ai/project.json
+```
+
+A repository with no override uses the built-in defaults, including `workflow.enabled = false`. Enable the workflow explicitly with:
+
+```bash
+agent-project set workflow.enabled true
+```
+
+`set` creates `.ai/project.json` when needed. The file stores only project overrides plus `schemaVersion`; omitted values continue to inherit built-in defaults.
+
+Inspect or change project settings with:
 
 ```bash
 agent-project effective
+agent-project get git.branch.mode
+agent-project set git.integration.mode pullRequest
+agent-project unset git.integration.mode
 ```
+
+Project-specific Agent rules belong in the repository-root `AGENTS.md`. They are independent of `.ai/project.json`: a project can have Agent rules without using this Git workflow, or use the workflow without additional Agent rules.
 
 See [Project Settings](ai/project-settings.md) for the complete configuration reference.
 
