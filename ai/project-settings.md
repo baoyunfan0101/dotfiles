@@ -25,13 +25,21 @@ agent-project set workflow.enabled true
 agent-project set git.integration.mode pullRequest
 ```
 
-`set` validates the value against the project schema and creates `.ai/project.json` when needed.
+`set` parses the schema type, validates the complete effective configuration, and creates `.ai/project.json` when needed. Booleans use `true` or `false`; lists use JSON, for example:
+
+```bash
+agent-project set git.branch.baseBranches '["main","develop"]'
+```
+
+Writes use a temporary file in `.ai/` followed by atomic replacement. Invalid changes leave the existing configuration untouched.
 
 Remove an override and return to its built-in default:
 
 ```bash
 agent-project unset git.integration.mode
 ```
+
+`unset` removes empty parent objects. Missing overrides are a no-op, and `schemaVersion` cannot be unset.
 
 `project.json` stores only explicit overrides plus `schemaVersion`; `effective` shows the result after merging those overrides with built-in defaults.
 
@@ -96,6 +104,8 @@ Supported values:
 | `1` | Current project settings schema. |
 
 The field is required when `.ai/project.json` exists.
+
+Existing version 1 configurations without `workflow.enabled` also inherit `false`; the file's presence alone does not enable the workflow.
 
 ## Workflow activation
 
