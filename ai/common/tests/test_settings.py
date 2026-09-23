@@ -26,10 +26,10 @@ class SettingsTests(unittest.TestCase):
         subprocess.run(["git", "init", "-q", str(self.repo)], env=self.env, check=True)
         self.config = self.repo / ".ai/project.json"
 
-    def run_project(self, *arguments):
+    def run_project(self, *arguments, cwd=None):
         return subprocess.run(
             [sys.executable, str(PROJECT), *arguments],
-            cwd=self.repo,
+            cwd=self.repo if cwd is None else cwd,
             env=self.env,
             capture_output=True,
             text=True,
@@ -44,6 +44,63 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         for command in ("effective", "get <path>", "set <path> <value>", "unset <path>"):
             self.assertIn(command, result.stdout)
+
+    def test_commands_outside_worktree_fail_without_mutation(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "keep").write_text("unchanged\n")
+        bare = self.root / "bare.git"
+        subprocess.run(["git", "init", "--bare", "-q", str(bare)],
+                       env=self.env, check=True)
+
+        def snapshot(directory):
+            return {str(p.relative_to(directory)): p.read_bytes() if p.is_file() else None
+                    for p in directory.rglob("*")}
+
+        for directory in (outside, bare):
+            before = snapshot(directory)
+            for arguments in (
+                ("effective",),
+                ("get", "workflow.enabled"),
+                ("set", "workflow.enabled", "true"),
+                ("unset", "workflow.enabled"),
+            ):
+                with self.subTest(directory=directory.name, arguments=arguments):
+                    result = self.run_project(*arguments, cwd=directory)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, "")
+                    self.assertEqual(result.stderr,
+                                     "agent-project: current directory is not inside a Git worktree\n")
+                    self.assertEqual(snapshot(directory), before)
+                    self.assertFalse((directory / ".ai").exists())
+
+    def test_nested_directory_uses_repository_root(self):
+        nested = self.repo / "src" / "nested"
+        nested.mkdir(parents=True)
+        result = self.run_project("set", "workflow.enabled", "true", cwd=nested)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(self.config.read_text()), {
+            "schemaVersion": 1, "workflow": {"enabled": True},
+        })
+        self.assertEqual(self.run_project("get", "workflow.enabled", cwd=nested).stdout,
+                         "true\n")
+        result = self.run_project("effective", cwd=nested)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json.loads(result.stdout)["workflow"]["enabled"])
+        result = self.run_project("unset", "workflow.enabled", cwd=nested)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(self.config.read_text()), {"schemaVersion": 1})
+        self.assertFalse((nested / ".ai").exists())
+
+    def test_missing_git_reports_error_without_traceback(self):
+        empty_bin = self.root / "empty-bin"
+        empty_bin.mkdir()
+        self.env["PATH"] = str(empty_bin)
+        result = self.run_project("set", "workflow.enabled", "true")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("agent-project: cannot run git:", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertFalse(self.config.parent.exists())
 
     def test_defaults_and_partial_overrides(self):
         result = self.run_project("effective")

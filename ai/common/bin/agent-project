@@ -87,16 +87,19 @@ def fail(message):
 
 
 def find_project_root():
-    result = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+        )
+    except OSError as error:
+        fail(f"cannot run git: {error}")
 
     if result.returncode == 0:
         return Path(result.stdout.strip())
 
-    return Path.cwd()
+    fail("current directory is not inside a Git worktree")
 
 
 def config_path():

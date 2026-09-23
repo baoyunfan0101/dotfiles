@@ -10,6 +10,8 @@ The file is optional. Missing settings inherit built-in defaults, and the workfl
 
 ## Manage project settings
 
+`agent-project` resolves `.ai/project.json` from the current Git repository root and fails outside a Git worktree.
+
 Show the complete effective configuration or one value:
 
 ```bash
