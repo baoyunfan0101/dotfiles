@@ -210,6 +210,118 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("skip", result.stdout)
 
+    def test_batch_set_creates_one_minimal_override(self):
+        result = self.run_project(
+            "set",
+            "workflow.enabled", "true",
+            "git.integration.mode", "pullRequest",
+            "git.commit.mode", "manual",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "[project] set ok count=3\n")
+        self.assertEqual(json.loads(self.config.read_text()), {
+            "schemaVersion": 1,
+            "workflow": {"enabled": True},
+            "git": {
+                "integration": {"mode": "pullRequest"},
+                "commit": {"mode": "manual"},
+            },
+        })
+        self.assertEqual(list(self.config.parent.iterdir()), [self.config])
+
+    def test_batch_set_preserves_unrelated_overrides(self):
+        self.write_config({
+            "schemaVersion": 1,
+            "workflow": {"enabled": False},
+            "git": {"sync": {"mode": "none"}},
+        })
+        result = self.run_project(
+            "set", "workflow.enabled", "true",
+            "git.integration.mode", "pullRequest",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(self.config.read_text()), {
+            "schemaVersion": 1,
+            "workflow": {"enabled": True},
+            "git": {
+                "sync": {"mode": "none"},
+                "integration": {"mode": "pullRequest"},
+            },
+        })
+
+    def test_batch_set_invalid_first_middle_and_final_leave_file_unchanged(self):
+        self.write_config({
+            "schemaVersion": 1,
+            "workflow": {"enabled": True},
+            "git": {
+                "commit": {"mode": "manual"},
+                "branch": {"mode": "current", "baseBranches": []},
+            },
+        })
+        before = self.config.read_bytes()
+        cases = (
+            (("unknown.setting", "x", "git.commit.mode", "automatic"),
+             "unknown setting"),
+            (("workflow.enabled", "false", "git.integration.mode", "invalid"),
+             "must be one of"),
+            (("git.branch.mode", "fromBase", "workflow.enabled", "false"),
+             "must not be empty"),
+        )
+        for arguments, error in cases:
+            with self.subTest(arguments=arguments):
+                result = self.run_project("set", *arguments)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(error, result.stderr)
+                self.assertEqual(self.config.read_bytes(), before)
+                self.assertEqual(list(self.config.parent.iterdir()), [self.config])
+
+    def test_invalid_batch_set_does_not_create_file(self):
+        result = self.run_project(
+            "set", "workflow.enabled", "true",
+            "git.integration.mode", "invalid",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.config.exists())
+        self.assertFalse(self.config.parent.exists())
+
+    def test_batch_unset_preserves_unrelated_values_and_prunes_parents(self):
+        self.write_config({
+            "schemaVersion": 1,
+            "workflow": {"enabled": True},
+            "git": {
+                "integration": {"mode": "pullRequest", "mergeMethod": "squash"},
+                "commit": {"mode": "manual"},
+            },
+        })
+        result = self.run_project(
+            "unset", "git.integration.mode", "git.integration.mergeMethod",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "[project] unset ok count=2\n")
+        self.assertEqual(json.loads(self.config.read_text()), {
+            "schemaVersion": 1,
+            "workflow": {"enabled": True},
+            "git": {"commit": {"mode": "manual"}},
+        })
+
+    def test_batch_unset_unknown_path_or_invalid_result_preserves_file(self):
+        self.write_config({
+            "schemaVersion": 1,
+            "workflow": {"enabled": True},
+            "git": {"branch": {"mode": "current", "baseBranches": []}},
+        })
+        before = self.config.read_bytes()
+        for arguments, error in (
+            (("git.branch.mode", "git.unknown"), "unknown setting"),
+            (("git.branch.mode", "workflow.enabled"), "must not be empty"),
+            (("schemaVersion", "workflow.enabled"), "cannot be unset"),
+        ):
+            with self.subTest(arguments=arguments):
+                result = self.run_project("unset", *arguments)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(error, result.stderr)
+                self.assertEqual(self.config.read_bytes(), before)
+
     def test_set_parses_schema_types(self):
         self.assertEqual(
             self.run_project("set", "git.branch.deleteAfterIntegration", "true").returncode,

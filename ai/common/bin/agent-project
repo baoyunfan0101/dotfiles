@@ -393,8 +393,8 @@ def usage(file=sys.stderr):
         "  agent-project schema [path]\n"
         "  agent-project effective\n"
         "  agent-project get <path>\n"
-        "  agent-project set <path> <value>\n"
-        "  agent-project unset <path>",
+        "  agent-project set <path> <value> [<path> <value> ...]\n"
+        "  agent-project unset <path> [<path> ...]",
         file=file,
     )
 
@@ -418,29 +418,37 @@ def main():
         print(json.dumps(project_schema(setting_path), separators=(",", ":")))
         return
 
-    if len(sys.argv) == 4 and sys.argv[1] == "set":
-        path = sys.argv[2]
-        value = parse_value(path, sys.argv[3])
+    if sys.argv[1:2] == ["set"] and len(sys.argv) >= 4 and len(sys.argv[2:]) % 2 == 0:
+        pairs = list(zip(sys.argv[2::2], sys.argv[3::2]))
+        parsed_values = [(path, parse_value(path, raw_value))
+                         for path, raw_value in pairs]
         overrides = load_overrides()
-        set_override(overrides, path, value)
+        for path, value in parsed_values:
+            set_override(overrides, path, value)
         validate_structure(overrides, SCHEMA)
         effective_settings(overrides)
         write_overrides(overrides)
-        print(f"[project] set ok path={path}")
+        if len(pairs) == 1:
+            print(f"[project] set ok path={pairs[0][0]}")
+        else:
+            print(f"[project] set ok count={len(pairs)}")
         return
 
-    if len(sys.argv) == 3 and sys.argv[1] == "unset":
-        path = sys.argv[2]
-        schema_type(path)
+    if sys.argv[1:2] == ["unset"] and len(sys.argv) >= 3:
+        paths = sys.argv[2:]
+        for path in paths:
+            schema_type(path)
         overrides = load_overrides()
-        changed = unset_override(overrides, path)
+        changed_count = sum(unset_override(overrides, path) for path in paths)
         effective_settings(overrides)
-        if changed or config_path().exists():
+        if changed_count or config_path().exists():
             write_overrides(overrides)
-        print(
-            f"[project] unset {'ok' if changed else 'skip'} path={path}"
-            + ("" if changed else " reason=not-overridden")
-        )
+        if len(paths) == 1:
+            path = paths[0]
+            print(f"[project] unset {'ok' if changed_count else 'skip'} path={path}"
+                  + ("" if changed_count else " reason=not-overridden"))
+        else:
+            print(f"[project] unset ok count={changed_count}")
         return
 
     usage()
