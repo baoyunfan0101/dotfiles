@@ -61,7 +61,7 @@ class PreflightTests(unittest.TestCase):
     def start(self):
         return self.run_action("start")
 
-    def run_action(self, action):
+    def run_action(self, action, cwd=None):
         arguments = {
             "start": ["--branch-name", "feat/test"],
             "commit": ["--message", "Change", "--all"],
@@ -70,7 +70,8 @@ class PreflightTests(unittest.TestCase):
         }
         return subprocess.run(
             [BASH, str(COMMON / "bin/git-workflow"), action, *arguments[action]],
-            cwd=self.repo, env={**self.env, "PATH": str(self.bin)},
+            cwd=self.repo if cwd is None else cwd,
+            env={**self.env, "PATH": str(self.bin)},
             capture_output=True, text=True,
         )
 
@@ -205,6 +206,41 @@ class PreflightTests(unittest.TestCase):
                         self.assert_blocked(command, "command not found", "core", fix, action)
                 finally:
                     hidden.rename(path)
+
+    def test_repository_validation_does_not_repeat_dependency_lookup(self):
+        lookups = self.root / "lookups.log"
+        startup = self.root / "trace-lookups.sh"
+        startup.write_text(
+            'command() {\n'
+            '  if [[ "${1:-}" == -v ]]; then\n'
+            f'    printf "%s\\n" "$2" >> {shlex.quote(str(lookups))}\n'
+            '  fi\n'
+            '  builtin command "$@"\n'
+            '}\n'
+        )
+        self.env["BASH_ENV"] = str(startup)
+        (self.repo / ".ai/project.json").write_text('{"schemaVersion":1}')
+        outside = self.root / "outside"
+        outside.mkdir()
+
+        for directory in (self.repo, outside):
+            for action in ("start", "commit", "finish", "push"):
+                with self.subTest(directory=directory.name, action=action):
+                    lookups.write_text("")
+                    result = self.run_action(action, cwd=directory)
+                    self.assertEqual(lookups.read_text().splitlines(),
+                                     ["git", "python3", "agent-project"])
+                    if directory == self.repo:
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(result.stdout,
+                                         f"[git] {action} skip reason=workflow-disabled\n")
+                        self.assertEqual(result.stderr, "")
+                    else:
+                        self.assertEqual(result.returncode, 1)
+                        self.assertEqual(result.stdout, "")
+                        self.assertEqual(result.stderr,
+                                         f'[git] {action} error reason="current directory is not inside a Git worktree"\n')
+                        self.assertEqual(list(outside.iterdir()), [])
 
     def test_finish_requires_gh_and_authentication(self):
         self.configure("pullRequest")
