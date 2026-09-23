@@ -80,6 +80,35 @@ ALLOWED_VALUES = {
     "git.integration.mergeMethod": {"squash", "mergeCommit"},
 }
 
+SETTING_DESCRIPTIONS = {
+    "schemaVersion": "Project settings schema version.",
+    "workflow.enabled": "Whether this repository uses git-workflow.",
+    "git.sync.mode": "Synchronization performed before workflow operations.",
+    "git.sync.updateMethod": "How an upstream update is applied.",
+    "git.backup.mode": "Local changes protected when a task starts.",
+    "git.backup.method": "How selected local changes are protected.",
+    "git.commit.mode": "Whether workflow commits and pushes are automatic.",
+    "git.branch.mode": "How the task branch is selected.",
+    "git.branch.baseBranches": "Branches treated as bases in fromBase mode.",
+    "git.branch.deleteAfterIntegration": "Whether local and remote task branches are deleted after local integration.",
+    "git.integration.mode": "Integration strategy used by finish.",
+    "git.integration.mergeMethod": "How a local merge integrates the task branch.",
+}
+
+SETTING_CONSTRAINTS = {
+    "git.branch.baseBranches": [
+        "unique non-empty strings",
+        "non-empty when git.branch.mode=fromBase",
+    ],
+}
+
+SCHEMA_TYPE_NAMES = {
+    bool: "boolean",
+    int: "integer",
+    str: "string",
+    list: "list[string]",
+}
+
 
 def fail(message):
     print(f"agent-project: {message}", file=sys.stderr)
@@ -151,6 +180,39 @@ def schema_type(path):
         fail(f"setting path must identify a value: {path}")
 
     return value
+
+
+def leaf_paths(schema, prefix=""):
+    for key, value in schema.items():
+        path = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            yield from leaf_paths(value, path)
+        else:
+            yield path
+
+
+def schema_entry(path):
+    expected = schema_type(path)
+    entry = {
+        "type": SCHEMA_TYPE_NAMES[expected],
+        "default": get_value(DEFAULT_SETTINGS, path),
+    }
+
+    if path in ALLOWED_VALUES:
+        entry["type"] = "enum"
+        entry["values"] = sorted(ALLOWED_VALUES[path])
+
+    entry["description"] = SETTING_DESCRIPTIONS[path]
+    if path in SETTING_CONSTRAINTS:
+        entry["constraints"] = SETTING_CONSTRAINTS[path]
+    return entry
+
+
+def project_schema(path=None):
+    if path is not None:
+        return schema_entry(path)
+    return {setting_path: schema_entry(setting_path)
+            for setting_path in leaf_paths(SCHEMA)}
 
 
 def get_value(settings, path):
@@ -328,6 +390,7 @@ def print_value(value):
 def usage(file=sys.stderr):
     print(
         "Usage:\n"
+        "  agent-project schema [path]\n"
         "  agent-project effective\n"
         "  agent-project get <path>\n"
         "  agent-project set <path> <value>\n"
@@ -347,6 +410,12 @@ def main():
 
     if len(sys.argv) == 3 and sys.argv[1] == "get":
         print_value(get_value(effective_settings(load_overrides()), sys.argv[2]))
+        return
+
+    if sys.argv[1:2] == ["schema"] and len(sys.argv) in {2, 3}:
+        config_path()
+        setting_path = sys.argv[2] if len(sys.argv) == 3 else None
+        print(json.dumps(project_schema(setting_path), separators=(",", ":")))
         return
 
     if len(sys.argv) == 4 and sys.argv[1] == "set":

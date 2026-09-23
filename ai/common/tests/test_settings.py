@@ -42,8 +42,66 @@ class SettingsTests(unittest.TestCase):
     def test_help(self):
         result = self.run_project("--help")
         self.assertEqual(result.returncode, 0, result.stderr)
-        for command in ("effective", "get <path>", "set <path> <value>", "unset <path>"):
+        for command in ("schema [path]", "effective", "get <path>",
+                        "set <path> <value>", "unset <path>"):
             self.assertIn(command, result.stdout)
+
+    def test_schema_discovers_supported_settings(self):
+        result = self.run_project("schema")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        schema = json.loads(result.stdout)
+        model = runpy.run_path(str(PROJECT))
+        paths = list(model["leaf_paths"](model["SCHEMA"]))
+        self.assertEqual(list(schema), paths)
+
+        type_names = model["SCHEMA_TYPE_NAMES"]
+        for path in paths:
+            with self.subTest(path=path):
+                entry = schema[path]
+                self.assertEqual(entry["default"], model["get_value"](
+                    model["DEFAULT_SETTINGS"], path))
+                expected = model["schema_type"](path)
+                self.assertEqual(entry["type"],
+                                 "enum" if path in model["ALLOWED_VALUES"]
+                                 else type_names[expected])
+                if path in model["ALLOWED_VALUES"]:
+                    self.assertEqual(entry["values"],
+                                     sorted(model["ALLOWED_VALUES"][path]))
+                self.assertIn("description", entry)
+
+    def test_schema_path_and_unknown_path(self):
+        result = self.run_project("schema", "git.integration.mode")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {
+            "type": "enum",
+            "default": "localMerge",
+            "values": ["localMerge", "pullRequest"],
+            "description": "Integration strategy used by finish.",
+        })
+
+        result = self.run_project("schema", "git.unknown")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("unknown setting: git.unknown", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_schema_ignores_invalid_config_and_does_not_mutate(self):
+        self.write_config({"invalid": True})
+        before = self.config.read_bytes()
+        result = self.run_project("schema")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("workflow.enabled", json.loads(result.stdout))
+        self.assertEqual(self.config.read_bytes(), before)
+
+        result = self.run_project("schema", "workflow.enabled")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["default"], False)
+        self.assertEqual(self.config.read_bytes(), before)
+
+        self.config.unlink()
+        self.config.parent.rmdir()
+        result = self.run_project("schema")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.config.parent.exists())
 
     def test_commands_outside_worktree_fail_without_mutation(self):
         outside = self.root / "outside"
@@ -60,6 +118,8 @@ class SettingsTests(unittest.TestCase):
         for directory in (outside, bare):
             before = snapshot(directory)
             for arguments in (
+                ("schema",),
+                ("schema", "workflow.enabled"),
                 ("effective",),
                 ("get", "workflow.enabled"),
                 ("set", "workflow.enabled", "true"),
