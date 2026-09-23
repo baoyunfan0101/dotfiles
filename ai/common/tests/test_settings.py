@@ -39,6 +39,13 @@ class SettingsTests(unittest.TestCase):
         self.config.parent.mkdir(parents=True, exist_ok=True)
         self.config.write_text(json.dumps(config))
 
+    def test_shared_instructions_describe_on_demand_configuration(self):
+        instructions = (PROJECT.parents[1] / "instructions.md").read_text()
+        self.assertIn("only when the user explicitly asks", instructions)
+        self.assertIn("agent-project schema [path]", instructions)
+        self.assertIn("Do not read or edit `.ai/project.json` directly", instructions)
+        self.assertNotIn("git.integration.mode", instructions)
+
     def test_help(self):
         result = self.run_project("--help")
         self.assertEqual(result.returncode, 0, result.stderr)

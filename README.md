@@ -72,6 +72,8 @@ A repository with no override uses the built-in defaults, including `workflow.en
 agent-project set workflow.enabled true
 ```
 
+Project settings can be managed through `agent-project`; agents discover settings on demand instead of editing `.ai/project.json` directly.
+
 `set` creates `.ai/project.json` when needed. The file stores only project overrides plus `schemaVersion`; omitted values continue to inherit built-in defaults.
 
 Inspect or change project settings with:
