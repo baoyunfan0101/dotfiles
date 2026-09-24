@@ -109,6 +109,8 @@ SCHEMA_TYPE_NAMES = {
     list: "list[string]",
 }
 
+NON_CONFIGURABLE_PATHS = {"schemaVersion"}
+
 
 def fail(message):
     print(f"agent-project: {message}", file=sys.stderr)
@@ -191,8 +193,19 @@ def leaf_paths(schema, prefix=""):
             yield path
 
 
+def configurable_paths():
+    return tuple(path for path in leaf_paths(SCHEMA)
+                 if path not in NON_CONFIGURABLE_PATHS)
+
+
+def configurable_type(path):
+    if path not in configurable_paths():
+        fail(f"unknown setting: {path}")
+    return schema_type(path)
+
+
 def schema_entry(path):
-    expected = schema_type(path)
+    expected = configurable_type(path)
     entry = {
         "type": SCHEMA_TYPE_NAMES[expected],
         "default": get_value(DEFAULT_SETTINGS, path),
@@ -212,7 +225,7 @@ def project_schema(path=None):
     if path is not None:
         return schema_entry(path)
     return {setting_path: schema_entry(setting_path)
-            for setting_path in leaf_paths(SCHEMA)}
+            for setting_path in configurable_paths()}
 
 
 def get_value(settings, path):
@@ -287,7 +300,7 @@ def effective_settings(overrides):
 
 
 def parse_value(path, raw_value):
-    expected = schema_type(path)
+    expected = configurable_type(path)
 
     if expected is str:
         value = raw_value
@@ -327,9 +340,6 @@ def set_override(overrides, path, value):
 
 
 def unset_override(overrides, path):
-    if path == "schemaVersion":
-        fail("schemaVersion cannot be unset")
-
     keys = path.split(".")
     current = overrides
     parents = []
@@ -409,6 +419,7 @@ def main():
         return
 
     if len(sys.argv) == 3 and sys.argv[1] == "get":
+        configurable_type(sys.argv[2])
         print_value(get_value(effective_settings(load_overrides()), sys.argv[2]))
         return
 
@@ -437,7 +448,7 @@ def main():
     if sys.argv[1:2] == ["unset"] and len(sys.argv) >= 3:
         paths = sys.argv[2:]
         for path in paths:
-            schema_type(path)
+            configurable_type(path)
         overrides = load_overrides()
         changed_count = sum(unset_override(overrides, path) for path in paths)
         effective_settings(overrides)

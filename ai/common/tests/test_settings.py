@@ -58,8 +58,10 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         schema = json.loads(result.stdout)
         model = runpy.run_path(str(PROJECT))
-        paths = list(model["leaf_paths"](model["SCHEMA"]))
+        paths = list(model["configurable_paths"]())
         self.assertEqual(list(schema), paths)
+        self.assertIn("schemaVersion", list(model["leaf_paths"](model["SCHEMA"])))
+        self.assertNotIn("schemaVersion", paths)
 
         type_names = model["SCHEMA_TYPE_NAMES"]
         for path in paths:
@@ -321,7 +323,7 @@ class SettingsTests(unittest.TestCase):
         for arguments, error in (
             (("git.branch.mode", "git.unknown"), "unknown setting"),
             (("git.branch.mode", "workflow.enabled"), "must not be empty"),
-            (("schemaVersion", "workflow.enabled"), "cannot be unset"),
+            (("schemaVersion", "workflow.enabled"), "unknown setting"),
         ):
             with self.subTest(arguments=arguments):
                 result = self.run_project("unset", *arguments)
@@ -358,12 +360,31 @@ class SettingsTests(unittest.TestCase):
         self.assertIn("valid JSON", result.stderr)
         self.assertFalse(self.config.exists())
 
-    def test_unset_schema_version_is_rejected(self):
+    def test_schema_version_is_not_a_project_setting(self):
         self.write_config({"schemaVersion": 1})
-        result = self.run_project("unset", "schemaVersion")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("cannot be unset", result.stderr)
-        self.assertEqual(json.loads(self.config.read_text()), {"schemaVersion": 1})
+        before = self.config.read_bytes()
+        for arguments in (
+            ("schema", "schemaVersion"),
+            ("get", "schemaVersion"),
+            ("set", "schemaVersion", "1"),
+            ("unset", "schemaVersion"),
+        ):
+            with self.subTest(arguments=arguments):
+                result = self.run_project(*arguments)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("unknown setting: schemaVersion", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(self.config.read_bytes(), before)
+
+    def test_setting_mutations_manage_schema_version_internally(self):
+        result = self.run_project("set", "workflow.enabled", "true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(self.config.read_text()), {
+            "schemaVersion": 1,
+            "workflow": {"enabled": True},
+        })
+        effective = json.loads(self.run_project("effective").stdout)
+        self.assertEqual(effective["schemaVersion"], 1)
 
     def test_invalid_mutations_preserve_existing_overrides(self):
         self.write_config({

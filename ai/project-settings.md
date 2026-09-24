@@ -12,6 +12,8 @@ The file is optional. Missing settings inherit built-in defaults, and the workfl
 
 `agent-project` resolves `.ai/project.json` from the current Git repository root and fails outside a Git worktree.
 
+`agent-project schema` exposes user-configurable settings. `schemaVersion` is managed internally as project-file metadata and is not part of the configurable setting namespace.
+
 When a user asks to configure project settings, an agent can discover available values with `agent-project schema` or inspect one setting with `agent-project schema <path>`. Schema output describes supported settings and defaults without reading `.ai/project.json`; it also works when that file is invalid. Agents should use `get` or `effective` only when the current value is needed, and should not read or edit the JSON file directly during normal configuration changes.
 
 Show the complete effective configuration or one value:
