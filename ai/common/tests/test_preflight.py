@@ -37,7 +37,7 @@ class PreflightTests(unittest.TestCase):
         (self.bin / "date").symlink_to(shutil.which("date"))
         for command in ("bash", "dirname", "readlink", "cat"):
             (self.bin / command).symlink_to(shutil.which(command))
-        (self.bin / "agent-project-settings").symlink_to(COMMON / "bin/project-settings")
+        (self.bin / "agent-project").symlink_to(COMMON / "bin/agent-project")
 
     def git(self, *args):
         return subprocess.check_output(
@@ -54,13 +54,14 @@ class PreflightTests(unittest.TestCase):
         directory.mkdir(exist_ok=True)
         (directory / "project.json").write_text(json.dumps({
             "schemaVersion": 1,
+            "workflow": {"enabled": True},
             "git": {"sync": {"mode": sync}, "integration": {"mode": mode}},
         }))
 
     def start(self):
         return self.run_action("start")
 
-    def run_action(self, action):
+    def run_action(self, action, cwd=None):
         arguments = {
             "start": ["--branch-name", "feat/test"],
             "commit": ["--message", "Change", "--all"],
@@ -69,7 +70,8 @@ class PreflightTests(unittest.TestCase):
         }
         return subprocess.run(
             [BASH, str(COMMON / "bin/git-workflow"), action, *arguments[action]],
-            cwd=self.repo, env={**self.env, "PATH": str(self.bin)},
+            cwd=self.repo if cwd is None else cwd,
+            env={**self.env, "PATH": str(self.bin)},
             capture_output=True, text=True,
         )
 
@@ -95,9 +97,9 @@ class PreflightTests(unittest.TestCase):
                  for p in self.repo.rglob("*") if p.is_file()}
         self.assertEqual(before, after)
         calls = self.log.read_text().splitlines() if self.log.exists() else []
-        allowed = {"rev-parse --show-toplevel"}
+        allowed = {"rev-parse --show-toplevel", "rev-parse --is-inside-work-tree"}
         if action == "finish":
-            allowed.update({"rev-parse --is-inside-work-tree", "symbolic-ref --quiet --short HEAD",
+            allowed.update({"symbolic-ref --quiet --short HEAD",
                             "config --get branch.feat/test.agentWorkflowBase",
                             "config --bool --get branch.feat/test.agentWorkflowCreated"})
         self.assertTrue(all(call in allowed for call in calls), calls)
@@ -114,10 +116,60 @@ class PreflightTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn(f'unknown command: {command}', result.stderr)
 
+    def test_disabled_workflow_skips_before_delivery_preflight(self):
+        directory = self.repo / ".ai"
+        (directory / "project.json").write_text(json.dumps({
+            "schemaVersion": 1,
+            "workflow": {"enabled": False},
+            "git": {"integration": {"mode": "pullRequest"}},
+        }))
+
+        for action in ("start", "commit", "finish", "push"):
+            result = self.run_action(action)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout,
+                f"[git] {action} skip reason=workflow-disabled\n",
+            )
+
     def test_pull_request_without_gh(self):
         self.configure("pullRequest", sync="fetch")
         self.assert_blocked("gh", "command not found", "git.integration.mode:pullRequest",
                             "install gh and ensure it is on PATH")
+
+    def test_disabled_workflow_preserves_repository_and_never_calls_gh(self):
+        marker = self.root / "gh-called"
+        self.stub("gh", f'printf called > {shlex.quote(str(marker))}; exit 1')
+        (self.repo / "tracked").write_text("changed\n")
+        (self.repo / "untracked").write_text("untracked\n")
+        config = self.repo / ".ai/project.json"
+
+        for enabled in (None, False):
+            settings = {
+                "schemaVersion": 1,
+                "git": {"integration": {"mode": "pullRequest"}},
+            }
+            if enabled is not None:
+                settings["workflow"] = {"enabled": enabled}
+            config.write_text(json.dumps(settings))
+            before = {str(p.relative_to(self.repo)): p.read_bytes()
+                      for p in self.repo.rglob("*") if p.is_file()}
+
+            for action in ("start", "commit", "finish", "push"):
+                with self.subTest(enabled=enabled, action=action):
+                    result = self.run_action(action)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout,
+                                     f"[git] {action} skip reason=workflow-disabled\n")
+                    self.assertEqual(result.stderr, "")
+                    self.assertFalse(marker.exists())
+                    after = {str(p.relative_to(self.repo)): p.read_bytes()
+                             for p in self.repo.rglob("*") if p.is_file()}
+                    self.assertEqual(before, after)
+
+        allowed = {"rev-parse --is-inside-work-tree", "rev-parse --show-toplevel"}
+        calls = self.log.read_text().splitlines()
+        self.assertTrue(all(call in allowed for call in calls), calls)
 
     def test_pull_request_without_authentication(self):
         self.configure("pullRequest", sync="fetch")
@@ -139,21 +191,56 @@ class PreflightTests(unittest.TestCase):
                 (self.repo / ".ai/project.json").write_text(content)
                 for action in ("start", "commit", "finish", "push"):
                     self.assert_blocked("project-settings", "configuration invalid", "core",
-                                        "fix .ai/project.json and run agent-project-settings effective", action)
+                                        "fix .ai/project.json and run agent-project effective", action)
 
     def test_missing_core_commands(self):
-        for command in ("git", "python3", "agent-project-settings"):
+        for command in ("git", "python3", "agent-project"):
             with self.subTest(command=command):
                 path = self.bin / command
                 hidden = self.root / command
                 path.rename(hidden)
                 try:
-                    fix = ("re-run the dotfiles AI installer" if command == "agent-project-settings"
+                    fix = ("re-run the dotfiles AI installer" if command == "agent-project"
                            else f"install {command} and ensure it is on PATH")
                     for action in ("start", "commit", "finish", "push"):
                         self.assert_blocked(command, "command not found", "core", fix, action)
                 finally:
                     hidden.rename(path)
+
+    def test_repository_validation_does_not_repeat_dependency_lookup(self):
+        lookups = self.root / "lookups.log"
+        startup = self.root / "trace-lookups.sh"
+        startup.write_text(
+            'command() {\n'
+            '  if [[ "${1:-}" == -v ]]; then\n'
+            f'    printf "%s\\n" "$2" >> {shlex.quote(str(lookups))}\n'
+            '  fi\n'
+            '  builtin command "$@"\n'
+            '}\n'
+        )
+        self.env["BASH_ENV"] = str(startup)
+        (self.repo / ".ai/project.json").write_text('{"schemaVersion":1}')
+        outside = self.root / "outside"
+        outside.mkdir()
+
+        for directory in (self.repo, outside):
+            for action in ("start", "commit", "finish", "push"):
+                with self.subTest(directory=directory.name, action=action):
+                    lookups.write_text("")
+                    result = self.run_action(action, cwd=directory)
+                    self.assertEqual(lookups.read_text().splitlines(),
+                                     ["git", "python3", "agent-project"])
+                    if directory == self.repo:
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(result.stdout,
+                                         f"[git] {action} skip reason=workflow-disabled\n")
+                        self.assertEqual(result.stderr, "")
+                    else:
+                        self.assertEqual(result.returncode, 1)
+                        self.assertEqual(result.stdout, "")
+                        self.assertEqual(result.stderr,
+                                         f'[git] {action} error reason="current directory is not inside a Git worktree"\n')
+                        self.assertEqual(list(outside.iterdir()), [])
 
     def test_finish_requires_gh_and_authentication(self):
         self.configure("pullRequest")

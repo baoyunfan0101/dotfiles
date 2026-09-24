@@ -215,6 +215,12 @@ finish() {
   parse_finish_args "$@"
   preflight_core
   require_repository
+
+  if ! project_workflow_enabled; then
+    printf '[git] finish skip reason=workflow-disabled\n'
+    return 0
+  fi
+
   load_finish_settings
 
   working_branch="$(current_branch)"

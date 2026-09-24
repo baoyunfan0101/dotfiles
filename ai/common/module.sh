@@ -1,8 +1,8 @@
 COMMON_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/agent-workflow"
 
 module_path \
-  "bin/project-settings" \
-  "$HOME/.local/bin/agent-project-settings"
+  "bin/agent-project" \
+  "$HOME/.local/bin/agent-project"
 
 module_path \
   "bin/git-workflow" \

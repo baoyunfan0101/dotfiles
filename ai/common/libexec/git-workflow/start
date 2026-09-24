@@ -46,9 +46,14 @@ start() {
   CURRENT_ACTION="start"
   parse_start_args "$@"
   preflight_core
-  preflight_delivery
   require_repository
 
+  if ! project_workflow_enabled; then
+    printf '[git] start skip reason=workflow-disabled\n'
+    return 0
+  fi
+
+  preflight_delivery
   ORIGINAL_BRANCH="$(current_branch)"
   load_start_settings
 

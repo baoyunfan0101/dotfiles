@@ -68,6 +68,12 @@ commit_changes() {
   parse_commit_args "$@"
   preflight_core
   require_repository
+
+  if ! project_workflow_enabled; then
+    printf '[git] commit skip reason=workflow-disabled\n'
+    return 0
+  fi
+
   load_commit_settings
 
   case "$COMMIT_MODE" in

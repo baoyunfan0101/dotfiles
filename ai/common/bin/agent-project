@@ -1,0 +1,470 @@
+#!/usr/bin/env python3
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from copy import deepcopy
+from pathlib import Path
+
+
+SCHEMA_VERSION = 1
+
+DEFAULT_SETTINGS = {
+    "schemaVersion": SCHEMA_VERSION,
+    "workflow": {
+        "enabled": False,
+    },
+    "git": {
+        "sync": {
+            "mode": "update",
+            "updateMethod": "ffOnly",
+        },
+        "backup": {
+            "mode": "all",
+            "method": "stash",
+        },
+        "commit": {
+            "mode": "automatic",
+        },
+        "branch": {
+            "mode": "fromBase",
+            "baseBranches": ["main"],
+            "deleteAfterIntegration": False,
+        },
+        "integration": {
+            "mode": "localMerge",
+            "mergeMethod": "mergeCommit",
+        },
+    },
+}
+
+SCHEMA = {
+    "schemaVersion": int,
+    "workflow": {
+        "enabled": bool,
+    },
+    "git": {
+        "sync": {
+            "mode": str,
+            "updateMethod": str,
+        },
+        "backup": {
+            "mode": str,
+            "method": str,
+        },
+        "commit": {
+            "mode": str,
+        },
+        "branch": {
+            "mode": str,
+            "baseBranches": list,
+            "deleteAfterIntegration": bool,
+        },
+        "integration": {
+            "mode": str,
+            "mergeMethod": str,
+        },
+    },
+}
+
+ALLOWED_VALUES = {
+    "git.sync.mode": {"none", "fetch", "update"},
+    "git.sync.updateMethod": {"ffOnly", "rebase", "merge"},
+    "git.backup.mode": {"none", "tracked", "untracked", "all"},
+    "git.backup.method": {"stash", "commit"},
+    "git.commit.mode": {"manual", "automatic"},
+    "git.branch.mode": {"current", "alwaysCreate", "fromBase"},
+    "git.integration.mode": {"localMerge", "pullRequest"},
+    "git.integration.mergeMethod": {"squash", "mergeCommit"},
+}
+
+SETTING_DESCRIPTIONS = {
+    "schemaVersion": "Project settings schema version.",
+    "workflow.enabled": "Whether this repository uses git-workflow.",
+    "git.sync.mode": "Synchronization performed before workflow operations.",
+    "git.sync.updateMethod": "How an upstream update is applied.",
+    "git.backup.mode": "Local changes protected when a task starts.",
+    "git.backup.method": "How selected local changes are protected.",
+    "git.commit.mode": "Whether workflow commits and pushes are automatic.",
+    "git.branch.mode": "How the task branch is selected.",
+    "git.branch.baseBranches": "Branches treated as bases in fromBase mode.",
+    "git.branch.deleteAfterIntegration": "Whether local and remote task branches are deleted after local integration.",
+    "git.integration.mode": "Integration strategy used by finish.",
+    "git.integration.mergeMethod": "How a local merge integrates the task branch.",
+}
+
+SETTING_CONSTRAINTS = {
+    "git.branch.baseBranches": [
+        "unique non-empty strings",
+        "non-empty when git.branch.mode=fromBase",
+    ],
+}
+
+SCHEMA_TYPE_NAMES = {
+    bool: "boolean",
+    int: "integer",
+    str: "string",
+    list: "list[string]",
+}
+
+NON_CONFIGURABLE_PATHS = {"schemaVersion"}
+
+
+def fail(message):
+    print(f"agent-project: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def find_project_root():
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+        )
+    except OSError as error:
+        fail(f"cannot run git: {error}")
+
+    if result.returncode == 0:
+        return Path(result.stdout.strip())
+
+    fail("current directory is not inside a Git worktree")
+
+
+def config_path():
+    return find_project_root() / ".ai" / "project.json"
+
+
+def merge_settings(defaults, overrides):
+    result = deepcopy(defaults)
+
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = merge_settings(result[key], value)
+        else:
+            result[key] = value
+
+    return result
+
+
+def validate_structure(value, schema, path=""):
+    if not isinstance(value, dict):
+        fail(f"{path or 'root'} must be an object")
+
+    unknown_keys = set(value) - set(schema)
+
+    if unknown_keys:
+        key = sorted(unknown_keys)[0]
+        full_path = f"{path}.{key}" if path else key
+        fail(f"unknown setting: {full_path}")
+
+    for key, item in value.items():
+        expected = schema[key]
+        current_path = f"{path}.{key}" if path else key
+
+        if isinstance(expected, dict):
+            validate_structure(item, expected, current_path)
+        elif type(item) is not expected:
+            fail(f"{current_path} has an invalid type")
+
+
+def schema_type(path):
+    value = SCHEMA
+
+    for key in path.split("."):
+        if not isinstance(value, dict) or key not in value:
+            fail(f"unknown setting: {path}")
+        value = value[key]
+
+    if isinstance(value, dict):
+        fail(f"setting path must identify a value: {path}")
+
+    return value
+
+
+def leaf_paths(schema, prefix=""):
+    for key, value in schema.items():
+        path = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            yield from leaf_paths(value, path)
+        else:
+            yield path
+
+
+def configurable_paths():
+    return tuple(path for path in leaf_paths(SCHEMA)
+                 if path not in NON_CONFIGURABLE_PATHS)
+
+
+def configurable_type(path):
+    if path not in configurable_paths():
+        fail(f"unknown setting: {path}")
+    return schema_type(path)
+
+
+def schema_entry(path):
+    expected = configurable_type(path)
+    entry = {
+        "type": SCHEMA_TYPE_NAMES[expected],
+        "default": get_value(DEFAULT_SETTINGS, path),
+    }
+
+    if path in ALLOWED_VALUES:
+        entry["type"] = "enum"
+        entry["values"] = sorted(ALLOWED_VALUES[path])
+
+    entry["description"] = SETTING_DESCRIPTIONS[path]
+    if path in SETTING_CONSTRAINTS:
+        entry["constraints"] = SETTING_CONSTRAINTS[path]
+    return entry
+
+
+def project_schema(path=None):
+    if path is not None:
+        return schema_entry(path)
+    return {setting_path: schema_entry(setting_path)
+            for setting_path in configurable_paths()}
+
+
+def get_value(settings, path):
+    value = settings
+
+    for key in path.split("."):
+        if not isinstance(value, dict) or key not in value:
+            fail(f"unknown setting: {path}")
+        value = value[key]
+
+    return value
+
+
+def validate_values(settings):
+    if settings["schemaVersion"] != SCHEMA_VERSION:
+        fail(f"unsupported schemaVersion: {settings['schemaVersion']}")
+
+    for path, allowed_values in ALLOWED_VALUES.items():
+        value = get_value(settings, path)
+
+        if value not in allowed_values:
+            allowed = ", ".join(sorted(allowed_values))
+            fail(f"{path} must be one of: {allowed}")
+
+    base_branches = settings["git"]["branch"]["baseBranches"]
+
+    if not all(isinstance(branch, str) and branch for branch in base_branches):
+        fail("git.branch.baseBranches must contain non-empty strings")
+
+    if len(base_branches) != len(set(base_branches)):
+        fail("git.branch.baseBranches must not contain duplicates")
+
+    if (
+        settings["git"]["branch"]["mode"] == "fromBase"
+        and not base_branches
+    ):
+        fail(
+            "git.branch.baseBranches must not be empty "
+            "when git.branch.mode is fromBase"
+        )
+
+
+def load_overrides():
+    path = config_path()
+
+    if not path.exists():
+        return {"schemaVersion": SCHEMA_VERSION}
+
+    try:
+        with path.open(encoding="utf-8") as file:
+            overrides = json.load(file)
+    except json.JSONDecodeError as error:
+        fail(f"invalid JSON in {path}: {error}")
+    except OSError as error:
+        fail(f"cannot read {path}: {error}")
+
+    validate_structure(overrides, SCHEMA)
+
+    if "schemaVersion" not in overrides:
+        fail("schemaVersion is required")
+
+    if overrides["schemaVersion"] != SCHEMA_VERSION:
+        fail(f"unsupported schemaVersion: {overrides['schemaVersion']}")
+
+    return overrides
+
+
+def effective_settings(overrides):
+    settings = merge_settings(DEFAULT_SETTINGS, overrides)
+    validate_values(settings)
+    return settings
+
+
+def parse_value(path, raw_value):
+    expected = configurable_type(path)
+
+    if expected is str:
+        value = raw_value
+    elif expected is bool:
+        if raw_value == "true":
+            value = True
+        elif raw_value == "false":
+            value = False
+        else:
+            fail(f"{path} must be true or false")
+    elif expected is int:
+        try:
+            value = int(raw_value)
+        except ValueError:
+            fail(f"{path} must be an integer")
+    else:
+        try:
+            value = json.loads(raw_value)
+        except json.JSONDecodeError as error:
+            fail(f"{path} must be valid JSON: {error.msg}")
+        if not isinstance(value, expected):
+            fail(f"{path} has an invalid type")
+
+    return value
+
+
+def set_override(overrides, path, value):
+    keys = path.split(".")
+    current = overrides
+
+    for key in keys[:-1]:
+        current = current.setdefault(key, {})
+        if not isinstance(current, dict):
+            fail(f"cannot set nested value under {key}")
+
+    current[keys[-1]] = value
+
+
+def unset_override(overrides, path):
+    keys = path.split(".")
+    current = overrides
+    parents = []
+
+    for key in keys[:-1]:
+        if not isinstance(current, dict) or key not in current:
+            return False
+        parents.append((current, key))
+        current = current[key]
+
+    if not isinstance(current, dict) or keys[-1] not in current:
+        return False
+
+    del current[keys[-1]]
+
+    for parent, key in reversed(parents):
+        child = parent[key]
+        if isinstance(child, dict) and not child:
+            del parent[key]
+        else:
+            break
+
+    return True
+
+
+def write_overrides(overrides):
+    path = config_path()
+
+    temporary = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=".project.json.",
+            delete=False,
+        ) as file:
+            temporary = Path(file.name)
+            json.dump(overrides, file, indent=2)
+            file.write("\n")
+        os.replace(temporary, path)
+    except OSError as error:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        fail(f"cannot write {path}: {error}")
+
+
+def print_value(value):
+    if isinstance(value, bool):
+        print("true" if value else "false")
+    elif isinstance(value, (dict, list)):
+        print(json.dumps(value, separators=(",", ":")))
+    else:
+        print(value)
+
+
+def usage(file=sys.stderr):
+    print(
+        "Usage:\n"
+        "  agent-project schema [path]\n"
+        "  agent-project effective\n"
+        "  agent-project get <path>\n"
+        "  agent-project set <path> <value> [<path> <value> ...]\n"
+        "  agent-project unset <path> [<path> ...]",
+        file=file,
+    )
+
+
+def main():
+    if len(sys.argv) == 2 and sys.argv[1] in {"-h", "--help"}:
+        usage(sys.stdout)
+        return
+
+    if len(sys.argv) == 2 and sys.argv[1] == "effective":
+        print(json.dumps(effective_settings(load_overrides()), indent=2))
+        return
+
+    if len(sys.argv) == 3 and sys.argv[1] == "get":
+        configurable_type(sys.argv[2])
+        print_value(get_value(effective_settings(load_overrides()), sys.argv[2]))
+        return
+
+    if sys.argv[1:2] == ["schema"] and len(sys.argv) in {2, 3}:
+        config_path()
+        setting_path = sys.argv[2] if len(sys.argv) == 3 else None
+        print(json.dumps(project_schema(setting_path), separators=(",", ":")))
+        return
+
+    if sys.argv[1:2] == ["set"] and len(sys.argv) >= 4 and len(sys.argv[2:]) % 2 == 0:
+        pairs = list(zip(sys.argv[2::2], sys.argv[3::2]))
+        parsed_values = [(path, parse_value(path, raw_value))
+                         for path, raw_value in pairs]
+        overrides = load_overrides()
+        for path, value in parsed_values:
+            set_override(overrides, path, value)
+        validate_structure(overrides, SCHEMA)
+        effective_settings(overrides)
+        write_overrides(overrides)
+        if len(pairs) == 1:
+            print(f"[project] set ok path={pairs[0][0]}")
+        else:
+            print(f"[project] set ok count={len(pairs)}")
+        return
+
+    if sys.argv[1:2] == ["unset"] and len(sys.argv) >= 3:
+        paths = sys.argv[2:]
+        for path in paths:
+            configurable_type(path)
+        overrides = load_overrides()
+        changed_count = sum(unset_override(overrides, path) for path in paths)
+        effective_settings(overrides)
+        if changed_count or config_path().exists():
+            write_overrides(overrides)
+        if len(paths) == 1:
+            path = paths[0]
+            print(f"[project] unset {'ok' if changed_count else 'skip'} path={path}"
+                  + ("" if changed_count else " reason=not-overridden"))
+        else:
+            print(f"[project] unset ok count={changed_count}")
+        return
+
+    usage()
+    raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()

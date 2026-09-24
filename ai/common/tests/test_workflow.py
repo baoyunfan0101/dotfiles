@@ -24,7 +24,7 @@ class WorkflowTests(unittest.TestCase):
         self.repo.mkdir()
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        (self.bin / "agent-project-settings").symlink_to(COMMON / "bin/project-settings")
+        (self.bin / "agent-project").symlink_to(COMMON / "bin/agent-project")
         self.env = isolated_environment(self.root)
         self.env["PATH"] = f"{self.bin}:{self.env['PATH']}"
         shutil.copyfile(COMMON / "tests/stubs/gh", self.bin / "gh")
@@ -45,7 +45,12 @@ class WorkflowTests(unittest.TestCase):
     def settings(self, **values):
         path = self.repo / ".ai/project.json"
         path.parent.mkdir(exist_ok=True)
-        config = json.loads(path.read_text()) if path.exists() else {"schemaVersion": 1, "git": {}}
+        config = json.loads(path.read_text()) if path.exists() else {
+            "schemaVersion": 1,
+            "workflow": {"enabled": True},
+            "git": {},
+        }
+        config.setdefault("workflow", {})["enabled"] = True
         for key, value in values.items():
             config["git"].setdefault(key, {}).update(value)
         path.write_text(json.dumps(config))
@@ -88,6 +93,22 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn(f"[git] {action} error", self.run_cli(action, "--invalid", ok=False).stderr)
         self.assertIn("no-workflow-created-branch", self.run_cli("finish").stdout)
 
+    def test_disabled_or_unconfigured_project_skips_workflow(self):
+        path = self.repo / ".ai/project.json"
+        path.unlink()
+
+        for action, arguments in (
+            ("start", ("--branch-name", "feat/test")),
+            ("commit", ("--message", "Change", "--all")),
+            ("push", ()),
+            ("finish", ()),
+        ):
+            result = self.run_cli(action, *arguments)
+            self.assertEqual(
+                result.stdout,
+                f"[git] {action} skip reason=workflow-disabled\n",
+            )
+
     def test_command_executables(self):
         for action in ("start", "commit", "finish", "push"):
             path = COMMON / "libexec/git-workflow" / action
@@ -110,6 +131,14 @@ class WorkflowTests(unittest.TestCase):
                 self.assertIn(destination, Path(target).parents)
                 self.assertTrue(Path(target).exists())
         self.env = {**install_env, "PATH": f"{destination / '.local/bin'}:{install_env['PATH']}"}
+        installed_project = destination / ".local/bin/agent-project"
+        self.assertTrue(installed_project.exists())
+        self.assertFalse((destination / ".local/bin/agent-project-settings").exists())
+        self.assertIn(
+            "agent-project set",
+            self.run_cli("--help", executable=installed_project).stdout,
+        )
+
         installed = destination / ".local/bin/git-workflow"
         self.assertIn("[git] start ok", self.run_cli("start", "--branch-name", "feat/test", executable=installed).stdout)
         self.change()
