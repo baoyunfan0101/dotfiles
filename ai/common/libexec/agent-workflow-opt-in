@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+
+def error(message):
+    print(f"agent-workflow-opt-in: {message}", file=sys.stderr)
+    return 2
+
+
+def main():
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+        )
+    except OSError as failure:
+        return error(f"cannot run git: {failure}")
+
+    if result.returncode != 0:
+        return 1
+
+    config = Path(result.stdout.strip()) / ".ai" / "project.json"
+    if not config.exists():
+        return 1
+
+    try:
+        with config.open(encoding="utf-8") as file:
+            settings = json.load(file)
+    except (OSError, UnicodeError, json.JSONDecodeError) as failure:
+        return error(f"cannot read {config}: {failure}")
+
+    if not isinstance(settings, dict):
+        return error(f"invalid workflow.enabled in {config}")
+    workflow = settings.get("workflow")
+    enabled = workflow.get("enabled") if isinstance(workflow, dict) else None
+    if type(enabled) is not bool:
+        return error(f"invalid workflow.enabled in {config}")
+    return 0 if enabled else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

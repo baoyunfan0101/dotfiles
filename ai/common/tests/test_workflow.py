@@ -134,6 +134,11 @@ class WorkflowTests(unittest.TestCase):
         self.env = {**install_env, "PATH": f"{destination / '.local/bin'}:{install_env['PATH']}"}
         installed_project = destination / ".local/bin/agent-project"
         self.assertTrue(installed_project.exists())
+        installed_probe = destination / ".local/libexec/agent-workflow-opt-in"
+        self.assertTrue(os.access(installed_probe, os.X_OK))
+        probe = subprocess.run([str(installed_probe)], cwd=self.repo, env=self.env,
+                               capture_output=True, text=True)
+        self.assertEqual(probe.returncode, 0, probe.stderr)
         self.assertFalse((destination / ".local/bin/agent-project-settings").exists())
         self.assertIn(
             "agent-project set",

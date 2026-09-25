@@ -43,6 +43,8 @@ Test the current checkout in isolation:
 
 Installing dotfiles makes the workflow available globally, but each repository decides whether to use it. The built-in default is `workflow.enabled = false`.
 
+The Codex global adapter checks the project's opt-in flag before loading shared workflow instructions. Projects without an enabled workflow do not load that guidance or run workflow commands for activation discovery.
+
 For an enabled repository:
 
 ```text
