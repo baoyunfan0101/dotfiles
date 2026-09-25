@@ -1,5 +1,7 @@
 import json
+from copy import deepcopy
 from pathlib import Path
+import runpy
 import shlex
 import shutil
 import subprocess
@@ -11,6 +13,7 @@ from sandbox import isolated_environment
 
 
 COMMON = Path(__file__).resolve().parents[1]
+DEFAULT_SETTINGS = runpy.run_path(str(COMMON / "bin/agent-project"))["DEFAULT_SETTINGS"]
 GIT = shutil.which("git")
 BASH = shutil.which("bash")
 
@@ -52,11 +55,11 @@ class PreflightTests(unittest.TestCase):
     def configure(self, mode, sync="none"):
         directory = self.repo / ".ai"
         directory.mkdir(exist_ok=True)
-        (directory / "project.json").write_text(json.dumps({
-            "schemaVersion": 1,
-            "workflow": {"enabled": True},
-            "git": {"sync": {"mode": sync}, "integration": {"mode": mode}},
-        }))
+        settings = deepcopy(DEFAULT_SETTINGS)
+        settings["workflow"]["enabled"] = True
+        settings["git"]["sync"]["mode"] = sync
+        settings["git"]["integration"]["mode"] = mode
+        (directory / "project.json").write_text(json.dumps(settings))
 
     def start(self):
         return self.run_action("start")
@@ -118,11 +121,9 @@ class PreflightTests(unittest.TestCase):
 
     def test_disabled_workflow_skips_before_delivery_preflight(self):
         directory = self.repo / ".ai"
-        (directory / "project.json").write_text(json.dumps({
-            "schemaVersion": 1,
-            "workflow": {"enabled": False},
-            "git": {"integration": {"mode": "pullRequest"}},
-        }))
+        settings = deepcopy(DEFAULT_SETTINGS)
+        settings["git"]["integration"]["mode"] = "pullRequest"
+        (directory / "project.json").write_text(json.dumps(settings))
 
         for action in ("start", "commit", "finish", "push"):
             result = self.run_action(action)
@@ -145,13 +146,13 @@ class PreflightTests(unittest.TestCase):
         config = self.repo / ".ai/project.json"
 
         for enabled in (None, False):
-            settings = {
-                "schemaVersion": 1,
-                "git": {"integration": {"mode": "pullRequest"}},
-            }
-            if enabled is not None:
-                settings["workflow"] = {"enabled": enabled}
-            config.write_text(json.dumps(settings))
+            if enabled is None:
+                config.unlink(missing_ok=True)
+            else:
+                settings = deepcopy(DEFAULT_SETTINGS)
+                settings["workflow"]["enabled"] = enabled
+                settings["git"]["integration"]["mode"] = "pullRequest"
+                config.write_text(json.dumps(settings))
             before = {str(p.relative_to(self.repo)): p.read_bytes()
                       for p in self.repo.rglob("*") if p.is_file()}
 
@@ -219,7 +220,7 @@ class PreflightTests(unittest.TestCase):
             '}\n'
         )
         self.env["BASH_ENV"] = str(startup)
-        (self.repo / ".ai/project.json").write_text('{"schemaVersion":1}')
+        (self.repo / ".ai/project.json").unlink()
         outside = self.root / "outside"
         outside.mkdir()
 

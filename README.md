@@ -8,7 +8,7 @@ A personal development environment and lightweight harness for AI coding agents.
 dotfiles/
   install.sh                    One-command install and update
   .ai/
-    project.json                Workflow overrides for this repository
+    project.json                Complete workflow settings for this repository
   README.md                     Project entry point
   test.sh                       Isolated repository tests
   ai/
@@ -61,13 +61,13 @@ Run `start` once before editing, `commit` zero or more times, and `finish` at mo
 
 ## Project Configuration
 
-Project overrides are stored in:
+Project settings are stored in:
 
 ```text
 <repository>/.ai/project.json
 ```
 
-A repository with no override uses the built-in defaults, including `workflow.enabled = false`. Enable the workflow explicitly with:
+A repository without this file uses the built-in defaults, including `workflow.enabled = false`. Enable the workflow explicitly with:
 
 ```bash
 agent-project set workflow.enabled true
@@ -75,7 +75,7 @@ agent-project set workflow.enabled true
 
 Project settings can be managed through `agent-project`; agents discover settings on demand instead of editing `.ai/project.json` directly.
 
-`set` creates `.ai/project.json` when needed. The file stores only project overrides plus `schemaVersion`; omitted values continue to inherit built-in defaults.
+`set` creates a complete `.ai/project.json` when needed. Existing project files keep their explicit settings even if built-in defaults change later. `unset` writes the current default value for a selected setting.
 
 Inspect or change project settings with:
 

@@ -1,7 +1,9 @@
 import json
+from copy import deepcopy
 import os
 from pathlib import Path
 import re
+import runpy
 import shutil
 import subprocess
 import tempfile
@@ -11,6 +13,7 @@ from sandbox import isolated_environment
 
 
 COMMON = Path(__file__).resolve().parents[1]
+DEFAULT_SETTINGS = runpy.run_path(str(COMMON / "bin/agent-project"))["DEFAULT_SETTINGS"]
 CLI = COMMON / "bin/git-workflow"
 
 
@@ -45,20 +48,18 @@ class WorkflowTests(unittest.TestCase):
     def settings(self, **values):
         path = self.repo / ".ai/project.json"
         path.parent.mkdir(exist_ok=True)
-        config = json.loads(path.read_text()) if path.exists() else {
-            "schemaVersion": 1,
-            "workflow": {"enabled": True},
-            "git": {},
-        }
-        config.setdefault("workflow", {})["enabled"] = True
+        config = json.loads(path.read_text()) if path.exists() else deepcopy(DEFAULT_SETTINGS)
+        config["workflow"]["enabled"] = True
         for key, value in values.items():
-            config["git"].setdefault(key, {}).update(value)
+            config["git"][key].update(value)
         path.write_text(json.dumps(config))
 
     def save_settings(self, **values):
         self.settings(**values)
         self.git("add", ".ai/project.json")
-        self.git("commit", "-qm", "Configure")
+        if subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=self.repo,
+                          env=self.env).returncode != 0:
+            self.git("commit", "-qm", "Configure")
 
     def run_cli(self, *args, ok=True, executable=CLI):
         result = subprocess.run([str(executable), *args], cwd=self.repo,

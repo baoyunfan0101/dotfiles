@@ -1,12 +1,12 @@
 # Project Settings
 
-This reference describes project-specific behavior for `start`, `commit`, and `finish`, plus the auxiliary `push` command. Project overrides are stored in:
+This reference describes project-specific behavior for `start`, `commit`, and `finish`, plus the auxiliary `push` command. Project settings are stored in:
 
 ```text
 <repository>/.ai/project.json
 ```
 
-The file is optional. Missing settings inherit built-in defaults, and the workflow is disabled by default. `schemaVersion` is required whenever `.ai/project.json` exists.
+The file is optional. Without it, the current built-in defaults apply and the workflow is disabled. Once created, the file contains every schema 1 setting. An incomplete file is invalid.
 
 ## Manage project settings
 
@@ -24,14 +24,14 @@ agent-project get workflow.enabled
 agent-project get git.branch.mode
 ```
 
-Set an override:
+Set a value:
 
 ```bash
 agent-project set workflow.enabled true
 agent-project set git.integration.mode pullRequest
 ```
 
-`set` parses the schema type, validates the complete effective configuration, and creates `.ai/project.json` when needed. Booleans use `true` or `false`; lists use JSON, for example:
+`set` parses the schema type, validates the complete configuration, and creates `.ai/project.json` from the current defaults when needed. Booleans use `true` or `false`; lists use JSON, for example:
 
 ```bash
 agent-project set git.branch.baseBranches '["main","develop"]'
@@ -39,15 +39,15 @@ agent-project set git.branch.baseBranches '["main","develop"]'
 
 Writes use a temporary file in `.ai/` followed by atomic replacement. Invalid changes leave the existing configuration untouched.
 
-Remove an override and return to its built-in default:
+Reset a value to the current built-in default:
 
 ```bash
 agent-project unset git.integration.mode
 ```
 
-`unset` removes empty parent objects. Missing overrides are a no-op, and `schemaVersion` cannot be unset.
+`unset` writes the default value explicitly. It never removes a required field, and `schemaVersion` is managed internally.
 
-Related settings can be changed in one operation. Each path and value is parsed in order, then the complete effective configuration is validated and written atomically once. Any invalid path, value, or resulting configuration leaves the file unchanged:
+Related settings can be changed in one operation. Each path and value is parsed in order, then the complete configuration is validated and written atomically once. Any invalid path, value, or resulting configuration leaves the file unchanged:
 
 ```bash
 agent-project set \
@@ -60,7 +60,7 @@ agent-project unset git.branch.mode git.integration.mergeMethod
 
 Single-setting `set` and `unset` remain supported. An agent can translate a natural-language request into these commands; the CLI does not parse natural language.
 
-`project.json` stores only explicit overrides plus `schemaVersion`; `effective` shows the result after merging those overrides with built-in defaults.
+`project.json` stores the complete configuration, including `schemaVersion`. `effective` returns that file when it exists or the current built-in defaults when it does not. Existing project behavior does not change when built-in defaults change.
 
 ## Default configuration
 
@@ -124,7 +124,7 @@ Supported values:
 
 The field is required when `.ai/project.json` exists.
 
-Existing version 1 configurations without `workflow.enabled` also inherit `false`; the file's presence alone does not enable the workflow.
+The field is required in every existing project file; the file's presence alone does not enable the workflow.
 
 ## Workflow activation
 
@@ -157,7 +157,7 @@ Disable it explicitly:
 agent-project set workflow.enabled false
 ```
 
-Remove the project override and return to the default `false`:
+Write the current default `false` explicitly:
 
 ```bash
 agent-project unset workflow.enabled
