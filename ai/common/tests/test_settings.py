@@ -448,7 +448,7 @@ class SettingsTests(unittest.TestCase):
         effective = json.loads(self.run_project("effective").stdout)
         self.assertEqual(effective["schemaVersion"], 1)
 
-    def test_invalid_mutations_preserve_existing_overrides(self):
+    def test_invalid_mutations_preserve_existing_settings(self):
         self.write_config({
             "schemaVersion": 1,
             "workflow": {"enabled": True},
@@ -505,7 +505,7 @@ class SettingsTests(unittest.TestCase):
     def test_unset_without_configuration_does_not_create_file(self):
         result = self.run_project("unset", "workflow.enabled")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("reason=not-overridden", result.stdout)
+        self.assertIn("reason=already-default", result.stdout)
         self.assertFalse(self.config.parent.exists())
 
     def test_invalid_settings(self):

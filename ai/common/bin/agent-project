@@ -310,9 +310,9 @@ def parse_value(path, raw_value):
     return value
 
 
-def set_override(overrides, path, value):
+def set_setting(settings, path, value):
     keys = path.split(".")
-    current = overrides
+    current = settings
 
     for key in keys[:-1]:
         current = current.setdefault(key, {})
@@ -325,7 +325,7 @@ def set_override(overrides, path, value):
 def reset_to_default(settings, path):
     default = deepcopy(get_value(DEFAULT_SETTINGS, path))
     changed = get_value(settings, path) != default
-    set_override(settings, path, default)
+    set_setting(settings, path, default)
     return changed
 
 
@@ -399,7 +399,7 @@ def main():
                          for path, raw_value in pairs]
         settings = load_settings()
         for path, value in parsed_values:
-            set_override(settings, path, value)
+            set_setting(settings, path, value)
         validate_structure(settings, SCHEMA)
         validate_values(settings)
         write_settings(settings)
@@ -422,7 +422,7 @@ def main():
         if len(paths) == 1:
             path = paths[0]
             print(f"[project] unset {'ok' if changed_count else 'skip'} path={path}"
-                  + ("" if changed_count else " reason=not-overridden"))
+                  + ("" if changed_count else " reason=already-default"))
         else:
             print(f"[project] unset ok count={changed_count}")
         return
