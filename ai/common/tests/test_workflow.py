@@ -89,6 +89,10 @@ class WorkflowTests(unittest.TestCase):
         help_text = self.run_cli("--help").stdout
         self.assertEqual(set(re.findall(r"^  ([a-z]+)$", help_text, re.MULTILINE)),
                          {"start", "commit", "finish", "push"})
+        for meaning in ("once before editing", "after editing", "--message MESSAGE",
+                        "-- PATH...", "outside commit", "when a workflow-created task",
+                        "local", "pull request", "--branch-name NAME", "--title TITLE"):
+            self.assertIn(meaning, help_text)
         for action in ("start", "commit", "finish", "push"):
             self.assertIn("Usage:", self.run_cli(action, "--help").stdout)
             self.assertIn(f"[git] {action} error", self.run_cli(action, "--invalid", ok=False).stderr)

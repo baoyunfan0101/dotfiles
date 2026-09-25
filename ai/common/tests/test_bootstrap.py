@@ -43,9 +43,30 @@ class BootstrapTests(unittest.TestCase):
             env=self.env, capture_output=True, text=True,
         )
 
+    def test_readme_quick_start_shows_install_enable_inspect_and_help(self):
+        readme = (ROOT / "README.md").read_text()
+        quick_start = readme.split("## Quick Start\n", 1)[1].split("\n## ", 1)[0]
+        commands = (
+            "curl -fsSL https://raw.githubusercontent.com/baoyunfan0101/dotfiles/main/install.sh | bash",
+            "agent-project set workflow.enabled true",
+            "agent-project effective",
+            "agent-project --help",
+            "git-workflow --help",
+        )
+        positions = [quick_start.index(command) for command in commands]
+        self.assertEqual(positions, sorted(positions))
+
     def test_first_install_and_repeated_run_converge(self):
         result = self.bootstrap(piped=True)
         self.assertEqual(result.returncode, 0, result.stderr)
+        for instruction in (
+            "dotfiles installed.",
+            "agent-project set workflow.enabled true",
+            "agent-project effective",
+            "agent-project --help",
+            "git-workflow --help",
+        ):
+            self.assertIn(instruction, result.stdout)
         self.assertTrue(self.project_cli.is_symlink())
         self.assertEqual(self.project_cli.resolve(),
                          (self.checkout / "ai/common/bin/agent-project").resolve())
@@ -53,6 +74,7 @@ class BootstrapTests(unittest.TestCase):
 
         result = self.bootstrap()
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("dotfiles installed.", result.stdout)
         self.assertEqual(self.git("rev-parse", "HEAD", cwd=self.checkout), original_head)
         self.assertEqual(self.project_cli.resolve(),
                          (self.checkout / "ai/common/bin/agent-project").resolve())
@@ -68,6 +90,7 @@ class BootstrapTests(unittest.TestCase):
 
         result = self.bootstrap()
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("dotfiles installed.", result.stdout)
         self.assertTrue(self.project_cli.is_symlink())
         self.assertEqual(self.git("rev-parse", "HEAD", cwd=self.checkout),
                          self.git("rev-parse", "HEAD", cwd=self.source))

@@ -32,3 +32,17 @@ fi
 
 bash "$checkout/ai/install.sh" --agents codex --symlink --force --clean || \
   fail "internal installer failed; inspect the error above and retry"
+
+cat <<'EOF'
+dotfiles installed.
+
+Enable workflow in a repository:
+  agent-project set workflow.enabled true
+
+Inspect project settings:
+  agent-project effective
+
+Help:
+  agent-project --help
+  git-workflow --help
+EOF

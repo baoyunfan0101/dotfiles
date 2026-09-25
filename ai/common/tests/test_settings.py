@@ -58,8 +58,12 @@ class SettingsTests(unittest.TestCase):
         instructions = (PROJECT.parents[1] / "instructions.md").read_text()
         self.assertIn("only when the user explicitly asks", instructions)
         self.assertIn("agent-project schema [path]", instructions)
+        self.assertIn("agent-project --help", instructions)
+        self.assertIn("git-workflow --help", instructions)
+        self.assertIn("start -> edit -> commit* -> finish", instructions)
         self.assertIn("Do not read or edit `.ai/project.json` directly", instructions)
         self.assertNotIn("git.integration.mode", instructions)
+        self.assertNotIn("README", instructions)
 
     def test_help(self):
         result = self.run_project("--help")
@@ -67,6 +71,11 @@ class SettingsTests(unittest.TestCase):
         for command in ("schema [path]", "effective", "get <path>",
                         "set <path> <value>", "unset <path>"):
             self.assertIn(command, result.stdout)
+        for meaning in ("types, defaults, allowed values, and constraints",
+                        "complete configuration", "one current setting value",
+                        "atomically", "complete", "Reset one or more values",
+                        "remain explicitly present"):
+            self.assertIn(meaning, result.stdout)
 
     def test_schema_discovers_supported_settings(self):
         result = self.run_project("schema")

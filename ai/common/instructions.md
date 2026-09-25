@@ -10,6 +10,7 @@
 ## Project Configuration
 
 - Use `agent-project` only when the user explicitly asks to inspect or change dotfiles project configuration.
+- Use `agent-project --help` for project configuration command syntax.
 - Discover available settings on demand with `agent-project schema [path]`.
 - Use `get` for one current value, `effective` for the full configuration, and `set` or `unset` to change settings. `unset` writes the current default value. Combine related changes in one command.
 - Do not read or edit `.ai/project.json` directly, except when the user explicitly asks to inspect the raw file or when debugging `agent-project` itself.
@@ -17,6 +18,8 @@
 ## Workflow
 
 Use `git-workflow` for repository-changing tasks. Do not run workflow commands for read-only tasks or reproduce their Git operations manually.
+
+Lifecycle: start -> edit -> commit* -> finish. Use `git-workflow --help` for command syntax and options.
 
 Start once before the task's first edit:
 

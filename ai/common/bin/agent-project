@@ -368,7 +368,17 @@ def usage(file=sys.stderr):
         "  agent-project effective\n"
         "  agent-project get <path>\n"
         "  agent-project set <path> <value> [<path> <value> ...]\n"
-        "  agent-project unset <path> [<path> ...]",
+        "  agent-project unset <path> [<path> ...]\n"
+        "\n"
+        "Commands:\n"
+        "  schema     Show settings, types, defaults, allowed values, and constraints.\n"
+        "             Optionally inspect one setting by path.\n"
+        "  effective  Show the complete configuration for the current repository.\n"
+        "  get        Show one current setting value.\n"
+        "  set        Set one or more values atomically. If absent, create a complete\n"
+        "             .ai/project.json from defaults.\n"
+        "  unset      Reset one or more values to current built-in defaults.\n"
+        "             Existing fields remain explicitly present in project.json.",
         file=file,
     )
 

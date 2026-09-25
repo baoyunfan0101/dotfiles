@@ -27,17 +27,17 @@ dotfiles/
 
 ## Quick Start
 
-Install, update, or repair the Codex configuration with the same command:
+Install, update, or repair with the same command, then enable and inspect workflow settings in a repository:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/baoyunfan0101/dotfiles/main/install.sh | bash
+agent-project set workflow.enabled true
+agent-project effective
+agent-project --help
+git-workflow --help
 ```
 
-Test the current checkout in isolation:
-
-```bash
-./test.sh
-```
+Run the project commands from the repository you want to configure. Use CLI help for command details and [Project Settings](ai/project-settings.md) for the full configuration reference.
 
 ## AI Workflow
 
