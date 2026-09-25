@@ -105,6 +105,8 @@ See [Project Settings](ai/project-settings.md) for the complete configuration re
 ./test.sh
 ```
 
+GitHub Actions runs the same test command on every push and pull request.
+
 Tests use temporary homes, repositories, local bare remotes, isolated configuration directories, and a stubbed `gh`. Both installer modes run inside the sandbox, which is removed on exit. Tests do not install into the real user environment or contact GitHub.
 
 ## Installation
