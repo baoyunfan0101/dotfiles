@@ -2,6 +2,7 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import runpy
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -43,6 +44,25 @@ class DispatcherTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout + result.stderr, "")
         self.assertEqual(self.config.read_bytes(), before)
+
+    def test_unconfigured_repository_does_not_require_python(self):
+        limited_bin = self.root / "limited-bin"
+        limited_bin.mkdir()
+        for command in ("bash", "git"):
+            (limited_bin / command).symlink_to(shutil.which(command))
+        env = dict(self.env, PATH=str(limited_bin))
+
+        result = subprocess.run([str(PROBE)], cwd=self.repo, env=env,
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout + result.stderr, "")
+
+        self.config.parent.mkdir()
+        self.config.write_text(json.dumps(DEFAULT_SETTINGS))
+        result = subprocess.run([str(PROBE)], cwd=self.repo, env=env,
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("python3 is required", result.stderr)
 
     def test_enabled_project_is_detected_from_nested_directory(self):
         settings = deepcopy(DEFAULT_SETTINGS)

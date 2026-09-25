@@ -1,47 +1,39 @@
-#!/usr/bin/env python3
+#!/usr/bin/env bash
 
+if ! command -v git >/dev/null 2>&1; then
+  printf 'agent-workflow-opt-in: cannot run git\n' >&2
+  exit 2
+fi
+
+repository_root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 1
+config="$repository_root/.ai/project.json"
+[[ -e "$config" ]] || exit 1
+
+if ! command -v python3 >/dev/null 2>&1; then
+  printf 'agent-workflow-opt-in: python3 is required to read %s\n' "$config" >&2
+  exit 2
+fi
+
+python3 - "$config" <<'PY'
 import json
-import subprocess
 import sys
 from pathlib import Path
 
 
-def error(message):
-    print(f"agent-workflow-opt-in: {message}", file=sys.stderr)
-    return 2
+config = Path(sys.argv[1])
 
+try:
+    with config.open(encoding="utf-8") as file:
+        settings = json.load(file)
+except (OSError, UnicodeError, json.JSONDecodeError) as failure:
+    print(f"agent-workflow-opt-in: cannot read {config}: {failure}", file=sys.stderr)
+    raise SystemExit(2)
 
-def main():
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-        )
-    except OSError as failure:
-        return error(f"cannot run git: {failure}")
+workflow = settings.get("workflow") if isinstance(settings, dict) else None
+enabled = workflow.get("enabled") if isinstance(workflow, dict) else None
+if type(enabled) is not bool:
+    print(f"agent-workflow-opt-in: invalid workflow.enabled in {config}", file=sys.stderr)
+    raise SystemExit(2)
 
-    if result.returncode != 0:
-        return 1
-
-    config = Path(result.stdout.strip()) / ".ai" / "project.json"
-    if not config.exists():
-        return 1
-
-    try:
-        with config.open(encoding="utf-8") as file:
-            settings = json.load(file)
-    except (OSError, UnicodeError, json.JSONDecodeError) as failure:
-        return error(f"cannot read {config}: {failure}")
-
-    if not isinstance(settings, dict):
-        return error(f"invalid workflow.enabled in {config}")
-    workflow = settings.get("workflow")
-    enabled = workflow.get("enabled") if isinstance(workflow, dict) else None
-    if type(enabled) is not bool:
-        return error(f"invalid workflow.enabled in {config}")
-    return 0 if enabled else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+raise SystemExit(0 if enabled else 1)
+PY
