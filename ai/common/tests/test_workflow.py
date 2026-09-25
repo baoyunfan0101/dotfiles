@@ -1,7 +1,9 @@
 import json
+from copy import deepcopy
 import os
 from pathlib import Path
 import re
+import runpy
 import shutil
 import subprocess
 import tempfile
@@ -11,6 +13,7 @@ from sandbox import isolated_environment
 
 
 COMMON = Path(__file__).resolve().parents[1]
+DEFAULT_SETTINGS = runpy.run_path(str(COMMON / "bin/agent-project"))["DEFAULT_SETTINGS"]
 CLI = COMMON / "bin/git-workflow"
 
 
@@ -45,20 +48,18 @@ class WorkflowTests(unittest.TestCase):
     def settings(self, **values):
         path = self.repo / ".ai/project.json"
         path.parent.mkdir(exist_ok=True)
-        config = json.loads(path.read_text()) if path.exists() else {
-            "schemaVersion": 1,
-            "workflow": {"enabled": True},
-            "git": {},
-        }
-        config.setdefault("workflow", {})["enabled"] = True
+        config = json.loads(path.read_text()) if path.exists() else deepcopy(DEFAULT_SETTINGS)
+        config["workflow"]["enabled"] = True
         for key, value in values.items():
-            config["git"].setdefault(key, {}).update(value)
+            config["git"][key].update(value)
         path.write_text(json.dumps(config))
 
     def save_settings(self, **values):
         self.settings(**values)
         self.git("add", ".ai/project.json")
-        self.git("commit", "-qm", "Configure")
+        if subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=self.repo,
+                          env=self.env).returncode != 0:
+            self.git("commit", "-qm", "Configure")
 
     def run_cli(self, *args, ok=True, executable=CLI):
         result = subprocess.run([str(executable), *args], cwd=self.repo,
@@ -88,6 +89,10 @@ class WorkflowTests(unittest.TestCase):
         help_text = self.run_cli("--help").stdout
         self.assertEqual(set(re.findall(r"^  ([a-z]+)$", help_text, re.MULTILINE)),
                          {"start", "commit", "finish", "push"})
+        for meaning in ("once before editing", "after editing", "--message MESSAGE",
+                        "-- PATH...", "outside commit", "when a workflow-created task",
+                        "local", "pull request", "--branch-name NAME", "--title TITLE"):
+            self.assertIn(meaning, help_text)
         for action in ("start", "commit", "finish", "push"):
             self.assertIn("Usage:", self.run_cli(action, "--help").stdout)
             self.assertIn(f"[git] {action} error", self.run_cli(action, "--invalid", ok=False).stderr)
@@ -133,6 +138,11 @@ class WorkflowTests(unittest.TestCase):
         self.env = {**install_env, "PATH": f"{destination / '.local/bin'}:{install_env['PATH']}"}
         installed_project = destination / ".local/bin/agent-project"
         self.assertTrue(installed_project.exists())
+        installed_probe = destination / ".local/libexec/agent-workflow-opt-in"
+        self.assertTrue(os.access(installed_probe, os.X_OK))
+        probe = subprocess.run([str(installed_probe)], cwd=self.repo, env=self.env,
+                               capture_output=True, text=True)
+        self.assertEqual(probe.returncode, 0, probe.stderr)
         self.assertFalse((destination / ".local/bin/agent-project-settings").exists())
         self.assertIn(
             "agent-project set",

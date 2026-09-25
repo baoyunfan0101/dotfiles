@@ -9,6 +9,10 @@ module_path \
   "$HOME/.local/bin/git-workflow"
 
 module_path \
+  "libexec/agent-workflow-opt-in" \
+  "$HOME/.local/libexec/agent-workflow-opt-in"
+
+module_path \
   "libexec/git-workflow" \
   "$HOME/.local/libexec/git-workflow"
 

@@ -6,8 +6,9 @@ A personal development environment and lightweight harness for AI coding agents.
 
 ```text
 dotfiles/
+  install.sh                    One-command install and update
   .ai/
-    project.json                Workflow overrides for this repository
+    project.json                Complete workflow settings for this repository
   README.md                     Project entry point
   test.sh                       Isolated repository tests
   ai/
@@ -26,21 +27,30 @@ dotfiles/
 
 ## Quick Start
 
-Install the Codex configuration:
+Install, update, or repair:
 
 ```bash
-./ai/install.sh --agents codex
+curl -fsSL https://raw.githubusercontent.com/baoyunfan0101/dotfiles/main/install.sh | bash
 ```
 
-Test the current checkout in isolation:
+Run the following commands inside the Git repository you want to configure.
 
 ```bash
-./test.sh
+cd /path/to/your/repository
+
+agent-project set workflow.enabled true
+agent-project effective
+agent-project --help
+git-workflow --help
 ```
+
+Use CLI help for command details and [Project Settings](ai/project-settings.md) for the full configuration reference.
 
 ## AI Workflow
 
 Installing dotfiles makes the workflow available globally, but each repository decides whether to use it. The built-in default is `workflow.enabled = false`.
+
+The Codex global adapter checks the project's opt-in flag before loading shared workflow instructions. Projects without an enabled workflow do not load that guidance or run workflow commands for activation discovery.
 
 For an enabled repository:
 
@@ -60,13 +70,13 @@ Run `start` once before editing, `commit` zero or more times, and `finish` at mo
 
 ## Project Configuration
 
-Project overrides are stored in:
+Project settings are stored in:
 
 ```text
 <repository>/.ai/project.json
 ```
 
-A repository with no override uses the built-in defaults, including `workflow.enabled = false`. Enable the workflow explicitly with:
+A repository without this file uses the built-in defaults, including `workflow.enabled = false`. Enable the workflow explicitly with:
 
 ```bash
 agent-project set workflow.enabled true
@@ -74,7 +84,7 @@ agent-project set workflow.enabled true
 
 Project settings can be managed through `agent-project`; agents discover settings on demand instead of editing `.ai/project.json` directly.
 
-`set` creates `.ai/project.json` when needed. The file stores only project overrides plus `schemaVersion`; omitted values continue to inherit built-in defaults.
+`set` creates a complete `.ai/project.json` when needed. Existing project files keep their explicit settings even if built-in defaults change later. `unset` writes the current default value for a selected setting.
 
 Inspect or change project settings with:
 
@@ -99,7 +109,9 @@ Tests use temporary homes, repositories, local bare remotes, isolated configurat
 
 ## Installation
 
-Install using symlinks (the default):
+Use the Quick Start command for normal installation and updates. It keeps a checkout at `~/.local/share/dotfiles` and runs the installer from there.
+
+For development from an existing checkout, install using symlinks:
 
 ```bash
 ./ai/install.sh --agents codex

@@ -14,13 +14,15 @@ Commands:
       synchronize, select the working branch, and restore protected changes.
 
   commit
-      Commit one atomic change. Automatic mode also pushes it.
+      Commit one atomic change after editing. Automatic mode also pushes it.
 
   push
-      Auxiliary operation: push the current branch according to project settings.
+      Auxiliary operation for an explicitly needed push outside commit: push
+      the current branch according to project settings.
 
   finish
-      Finish and deliver a completed workflow-created task according to project settings.
+      Run once when a workflow-created task is complete. Deliver by local
+      integration or pull request according to project settings and user scope.
 
 Read-only tasks do not use workflow commands.
 

@@ -2,5 +2,27 @@
   "schemaVersion": 1,
   "workflow": {
     "enabled": true
+  },
+  "git": {
+    "sync": {
+      "mode": "update",
+      "updateMethod": "ffOnly"
+    },
+    "backup": {
+      "mode": "all",
+      "method": "stash"
+    },
+    "commit": {
+      "mode": "automatic"
+    },
+    "branch": {
+      "mode": "fromBase",
+      "baseBranches": ["main"],
+      "deleteAfterIntegration": false
+    },
+    "integration": {
+      "mode": "localMerge",
+      "mergeMethod": "mergeCommit"
+    }
   }
 }

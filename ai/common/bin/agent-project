@@ -137,18 +137,6 @@ def config_path():
     return find_project_root() / ".ai" / "project.json"
 
 
-def merge_settings(defaults, overrides):
-    result = deepcopy(defaults)
-
-    for key, value in overrides.items():
-        if isinstance(value, dict) and isinstance(result.get(key), dict):
-            result[key] = merge_settings(result[key], value)
-        else:
-            result[key] = value
-
-    return result
-
-
 def validate_structure(value, schema, path=""):
     if not isinstance(value, dict):
         fail(f"{path or 'root'} must be an object")
@@ -159,6 +147,13 @@ def validate_structure(value, schema, path=""):
         key = sorted(unknown_keys)[0]
         full_path = f"{path}.{key}" if path else key
         fail(f"unknown setting: {full_path}")
+
+    for key in schema:
+        if key not in value:
+            if not path and key == "schemaVersion":
+                fail("schemaVersion is required")
+            full_path = f"{path}.{key}" if path else key
+            fail(f"missing setting: {full_path}")
 
     for key, item in value.items():
         expected = schema[key]
@@ -268,33 +263,21 @@ def validate_values(settings):
         )
 
 
-def load_overrides():
+def load_settings():
     path = config_path()
 
     if not path.exists():
-        return {"schemaVersion": SCHEMA_VERSION}
+        return deepcopy(DEFAULT_SETTINGS)
 
     try:
         with path.open(encoding="utf-8") as file:
-            overrides = json.load(file)
+            settings = json.load(file)
     except json.JSONDecodeError as error:
         fail(f"invalid JSON in {path}: {error}")
     except OSError as error:
         fail(f"cannot read {path}: {error}")
 
-    validate_structure(overrides, SCHEMA)
-
-    if "schemaVersion" not in overrides:
-        fail("schemaVersion is required")
-
-    if overrides["schemaVersion"] != SCHEMA_VERSION:
-        fail(f"unsupported schemaVersion: {overrides['schemaVersion']}")
-
-    return overrides
-
-
-def effective_settings(overrides):
-    settings = merge_settings(DEFAULT_SETTINGS, overrides)
+    validate_structure(settings, SCHEMA)
     validate_values(settings)
     return settings
 
@@ -327,9 +310,9 @@ def parse_value(path, raw_value):
     return value
 
 
-def set_override(overrides, path, value):
+def set_setting(settings, path, value):
     keys = path.split(".")
-    current = overrides
+    current = settings
 
     for key in keys[:-1]:
         current = current.setdefault(key, {})
@@ -339,33 +322,14 @@ def set_override(overrides, path, value):
     current[keys[-1]] = value
 
 
-def unset_override(overrides, path):
-    keys = path.split(".")
-    current = overrides
-    parents = []
-
-    for key in keys[:-1]:
-        if not isinstance(current, dict) or key not in current:
-            return False
-        parents.append((current, key))
-        current = current[key]
-
-    if not isinstance(current, dict) or keys[-1] not in current:
-        return False
-
-    del current[keys[-1]]
-
-    for parent, key in reversed(parents):
-        child = parent[key]
-        if isinstance(child, dict) and not child:
-            del parent[key]
-        else:
-            break
-
-    return True
+def reset_to_default(settings, path):
+    default = deepcopy(get_value(DEFAULT_SETTINGS, path))
+    changed = get_value(settings, path) != default
+    set_setting(settings, path, default)
+    return changed
 
 
-def write_overrides(overrides):
+def write_settings(settings):
     path = config_path()
 
     temporary = None
@@ -379,7 +343,7 @@ def write_overrides(overrides):
             delete=False,
         ) as file:
             temporary = Path(file.name)
-            json.dump(overrides, file, indent=2)
+            json.dump(settings, file, indent=2)
             file.write("\n")
         os.replace(temporary, path)
     except OSError as error:
@@ -404,7 +368,17 @@ def usage(file=sys.stderr):
         "  agent-project effective\n"
         "  agent-project get <path>\n"
         "  agent-project set <path> <value> [<path> <value> ...]\n"
-        "  agent-project unset <path> [<path> ...]",
+        "  agent-project unset <path> [<path> ...]\n"
+        "\n"
+        "Commands:\n"
+        "  schema     Show settings, types, defaults, allowed values, and constraints.\n"
+        "             Optionally inspect one setting by path.\n"
+        "  effective  Show the complete configuration for the current repository.\n"
+        "  get        Show one current setting value.\n"
+        "  set        Set one or more values atomically. If absent, create a complete\n"
+        "             .ai/project.json from defaults.\n"
+        "  unset      Reset one or more values to current built-in defaults.\n"
+        "             Existing fields remain explicitly present in project.json.",
         file=file,
     )
 
@@ -415,12 +389,12 @@ def main():
         return
 
     if len(sys.argv) == 2 and sys.argv[1] == "effective":
-        print(json.dumps(effective_settings(load_overrides()), indent=2))
+        print(json.dumps(load_settings(), indent=2))
         return
 
     if len(sys.argv) == 3 and sys.argv[1] == "get":
         configurable_type(sys.argv[2])
-        print_value(get_value(effective_settings(load_overrides()), sys.argv[2]))
+        print_value(get_value(load_settings(), sys.argv[2]))
         return
 
     if sys.argv[1:2] == ["schema"] and len(sys.argv) in {2, 3}:
@@ -433,12 +407,12 @@ def main():
         pairs = list(zip(sys.argv[2::2], sys.argv[3::2]))
         parsed_values = [(path, parse_value(path, raw_value))
                          for path, raw_value in pairs]
-        overrides = load_overrides()
+        settings = load_settings()
         for path, value in parsed_values:
-            set_override(overrides, path, value)
-        validate_structure(overrides, SCHEMA)
-        effective_settings(overrides)
-        write_overrides(overrides)
+            set_setting(settings, path, value)
+        validate_structure(settings, SCHEMA)
+        validate_values(settings)
+        write_settings(settings)
         if len(pairs) == 1:
             print(f"[project] set ok path={pairs[0][0]}")
         else:
@@ -449,15 +423,16 @@ def main():
         paths = sys.argv[2:]
         for path in paths:
             configurable_type(path)
-        overrides = load_overrides()
-        changed_count = sum(unset_override(overrides, path) for path in paths)
-        effective_settings(overrides)
+        settings = load_settings()
+        changed_count = sum(reset_to_default(settings, path) for path in paths)
+        validate_structure(settings, SCHEMA)
+        validate_values(settings)
         if changed_count or config_path().exists():
-            write_overrides(overrides)
+            write_settings(settings)
         if len(paths) == 1:
             path = paths[0]
             print(f"[project] unset {'ok' if changed_count else 'skip'} path={path}"
-                  + ("" if changed_count else " reason=not-overridden"))
+                  + ("" if changed_count else " reason=already-default"))
         else:
             print(f"[project] unset ok count={changed_count}")
         return
