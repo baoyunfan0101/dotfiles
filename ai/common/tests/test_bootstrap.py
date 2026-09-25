@@ -74,6 +74,20 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual((self.checkout / "ai/common/instructions.md").read_text(),
                          "updated\n")
 
+    def test_unmanaged_declared_target_is_replaced_without_touching_other_files(self):
+        self.project_cli.parent.mkdir(parents=True)
+        self.project_cli.write_text("old installation\n")
+        personal_file = self.project_cli.parent / "personal-tool"
+        personal_file.write_text("keep me\n")
+
+        for _ in range(2):
+            result = self.bootstrap()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(self.project_cli.is_symlink())
+            self.assertEqual(self.project_cli.resolve(),
+                             (self.checkout / "ai/common/bin/agent-project").resolve())
+            self.assertEqual(personal_file.read_text(), "keep me\n")
+
     def test_missing_git_and_dirty_checkout_report_errors(self):
         env = dict(self.env)
         env["PATH"] = str(self.root / "empty-bin")

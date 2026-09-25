@@ -30,5 +30,5 @@ else
     fail "cannot fast-forward main; inspect local commits in $checkout"
 fi
 
-bash "$checkout/ai/install.sh" --agents codex --symlink --clean || \
+bash "$checkout/ai/install.sh" --agents codex --symlink --force --clean || \
   fail "internal installer failed; inspect the error above and retry"
