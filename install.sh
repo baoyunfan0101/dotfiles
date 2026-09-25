@@ -36,7 +36,9 @@ bash "$checkout/ai/install.sh" --agents codex --symlink --force --clean || \
 cat <<'EOF'
 dotfiles installed.
 
-Enable workflow in a repository:
+In the Git repository you want to configure:
+
+  cd /path/to/your/repository
   agent-project set workflow.enabled true
 
 Inspect project settings:

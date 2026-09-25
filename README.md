@@ -27,17 +27,24 @@ dotfiles/
 
 ## Quick Start
 
-Install, update, or repair with the same command, then enable and inspect workflow settings in a repository:
+Install, update, or repair:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/baoyunfan0101/dotfiles/main/install.sh | bash
+```
+
+Run the following commands inside the Git repository you want to configure.
+
+```bash
+cd /path/to/your/repository
+
 agent-project set workflow.enabled true
 agent-project effective
 agent-project --help
 git-workflow --help
 ```
 
-Run the project commands from the repository you want to configure. Use CLI help for command details and [Project Settings](ai/project-settings.md) for the full configuration reference.
+Use CLI help for command details and [Project Settings](ai/project-settings.md) for the full configuration reference.
 
 ## AI Workflow
 
