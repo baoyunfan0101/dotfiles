@@ -6,6 +6,7 @@ A personal development environment and lightweight harness for AI coding agents.
 
 ```text
 dotfiles/
+  install.sh                    One-command install and update
   .ai/
     project.json                Workflow overrides for this repository
   README.md                     Project entry point
@@ -26,10 +27,10 @@ dotfiles/
 
 ## Quick Start
 
-Install the Codex configuration:
+Install, update, or repair the Codex configuration with the same command:
 
 ```bash
-./ai/install.sh --agents codex
+curl -fsSL https://raw.githubusercontent.com/baoyunfan0101/dotfiles/main/install.sh | bash
 ```
 
 Test the current checkout in isolation:
@@ -99,7 +100,9 @@ Tests use temporary homes, repositories, local bare remotes, isolated configurat
 
 ## Installation
 
-Install using symlinks (the default):
+Use the Quick Start command for normal installation and updates. It keeps a checkout at `~/.local/share/dotfiles` and runs the installer from there.
+
+For development from an existing checkout, install using symlinks:
 
 ```bash
 ./ai/install.sh --agents codex
