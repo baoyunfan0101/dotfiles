@@ -321,7 +321,7 @@ When the selected mode requires a new branch, `git-workflow prepare` must receiv
 git-workflow prepare --branch-name <candidate-branch>
 ```
 
-Branches created by `git-workflow prepare` are marked with Git configuration metadata recording the working branch and its base. A working branch may contain multiple Task Specs and atomic commits; a new Task Spec does not by itself select a new branch.
+A working branch is an ordinary Git branch and may contain multiple Task Specs and atomic commits. Existing branches work with `current` and `fromBase`; a new Task Spec does not by itself select a new branch. Delivery resolves its base when requested.
 
 ### `git.branch.baseBranches`
 
@@ -349,11 +349,11 @@ When:
 
 the list must not be empty.
 
-This setting primarily affects `git.branch.mode = "fromBase"`.
+This list controls `fromBase` branch selection and the allowed/default delivery bases. Delivery uses explicit `--base`, then an existing PR's base for PR operations, then the sole configured base. Multiple possibilities require `--base`; bases outside this list are rejected. A configured base branch cannot itself be delivered.
 
 ### `git.branch.deleteAfterIntegration`
 
-Controls whether a workflow-created working branch is deleted after successful local integration or PR merge.
+Controls whether the working branch is deleted after successful local integration or PR merge.
 
 Default:
 
@@ -368,7 +368,7 @@ Supported values:
 | `false` | Keep the working branch after integration. |
 | `true` | Delete the integrated working branch locally and delete its remote branch when the remote branch exists. |
 
-This setting applies to both integration modes. PR submission keeps the branch and its workflow state.
+This setting applies to both integration modes. PR submission keeps the branch.
 
 When squash integration is used, the local working branch is force-deleted because its commits are not direct ancestors of the resulting squash commit.
 
@@ -377,14 +377,14 @@ When squash integration is used, the local working branch is force-deleted becau
 Delivery requires explicit user authorization:
 
 ```bash
-git-workflow pr submit
-git-workflow pr merge
-git-workflow merge
+git-workflow pr submit [--base <branch>]
+git-workflow pr merge [--base <branch>]
+git-workflow merge [--base <branch>]
 ```
 
 Use `pr submit` only when the user requests PR submission or an update, `pr merge` only when they approve merging the PR, and `merge` only when they authorize local integration. Completing a Task Spec or commit does not authorize delivery. PR submission and CI success do not authorize merging.
 
-Delivery requires a workflow working branch, a known base, and a clean working tree. Successful integration syncs the base, applies branch cleanup, and clears workflow branch state. Submission preserves that state.
+Delivery requires a non-base current branch, a resolvable configured base, and a clean working tree. Successful integration syncs the base and applies branch cleanup.
 
 ### `git.integration.mode`
 
@@ -405,7 +405,7 @@ Supported values:
 
 PR commands require `gh` and authentication. Development commands do not. `merge` rejects pullRequest mode; PR commands reject localMerge mode.
 
-`pr submit` pushes the branch and finds the open PR matching head and base. It generates the title from the sole commit subject or, for multiple commits, from the working branch name. The body lists all `base..working-branch` subjects oldest first under `## Summary`. Repeated submission updates the same PR using the complete history.
+`pr submit` finds open PRs for the current head and resolves the base before pushing. Without `--base`, a single existing PR supplies its base after validation; multiple PRs require explicit selection. It generates the title from the sole commit subject or, for multiple commits, from the working branch name. The body lists all `base..working-branch` subjects oldest first under `## Summary`. Repeated submission updates the same PR using the complete history.
 
 `pr merge` requires an existing open PR and never creates one or enables auto-merge. It rejects merge queues, checks that the PR head matches the current commit, and confirms the PR has merged before syncing the base and cleaning up.
 

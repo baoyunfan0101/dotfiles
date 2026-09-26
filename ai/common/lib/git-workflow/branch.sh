@@ -35,7 +35,6 @@ create_working_branch() {
 
   git checkout -q -b "$BRANCH_NAME"
   BRANCH_CREATED=true
-  mark_workflow_branch "$BRANCH_NAME" "$ORIGINAL_BRANCH"
 }
 
 select_working_branch() {

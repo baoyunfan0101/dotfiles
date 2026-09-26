@@ -34,11 +34,10 @@ print_prepare_result() {
     backup_result="$BACKUP_METHOD"
   fi
 
-  printf '[git] prepare ok backup=%s sync=%s branch=%s base=%s created=%s\n' \
+  printf '[git] prepare ok backup=%s sync=%s branch=%s created=%s\n' \
     "$backup_result" \
     "$SYNC_RESULT" \
     "$WORKING_BRANCH" \
-    "$ORIGINAL_BRANCH" \
     "$BRANCH_CREATED"
 }
 

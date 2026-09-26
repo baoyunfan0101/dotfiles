@@ -4,25 +4,38 @@ INTEGRATION_MESSAGE=""
 PR_TITLE=""
 PR_BODY=""
 INTEGRATION_BRANCH_DELETED=false
+DELIVERY_BASE=""
 
-parse_merge_args() {
+parse_delivery_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --base)
+        [[ $# -ge 2 && -n "$2" ]] || fail "missing value for --base"
+        DELIVERY_BASE="$2"
+        shift 2
+        ;;
+      --base=*)
+        DELIVERY_BASE="${1#*=}"
+        [[ -n "$DELIVERY_BASE" ]] || fail "missing value for --base"
+        shift
+        ;;
       --message)
+        [[ "$CURRENT_ACTION" == merge ]] || fail "unknown option: $1"
         [[ $# -ge 2 ]] || fail "missing value for --message"
         INTEGRATION_MESSAGE="$2"
         shift 2
         ;;
       --message=*)
+        [[ "$CURRENT_ACTION" == merge ]] || fail "unknown option: $1"
         INTEGRATION_MESSAGE="${1#*=}"
         shift
         ;;
       -h|--help)
-        usage
+        if [[ "$CURRENT_ACTION" == merge ]]; then usage; else pr_usage; fi
         exit 0
         ;;
       *)
-        fail "unknown merge option: $1"
+        fail "unknown option: $1"
         ;;
     esac
   done
@@ -87,7 +100,10 @@ integrate_local_branch() {
   fi
 
   git checkout -q "$base_branch"
-  sync_current_branch "$base_branch"
+  if ! sync_current_branch "$base_branch"; then
+    git checkout -q "$working_branch"
+    fail "base sync failed; current branch and commits were preserved"
+  fi
 
   case "$INTEGRATION_MERGE_METHOD" in
     mergeCommit)
@@ -122,15 +138,11 @@ integrate_local_branch() {
 
   if ! push_branch "$base_branch"; then
     git checkout "$working_branch" >/dev/null 2>&1 || true
-    fail "integration completed locally but push failed; workflow state was preserved"
+    fail "integration completed locally but push failed; commits and branches were preserved"
   fi
 
   if [[ "$DELETE_AFTER_INTEGRATION" == true ]]; then
     delete_delivered_branch "$working_branch" "$base_branch"
-    clear_workflow_branch "$working_branch"
-  else
-    clear_workflow_branch "$working_branch"
-    INTEGRATION_BRANCH_DELETED=false
   fi
 
   printf '[git] merge ok mode=localMerge target=%s method=%s sha=%s deleted=%s\n' \
@@ -160,9 +172,11 @@ initialize_delivery() {
   fi
 
   working_branch="$(current_branch)"
-  base_branch="$(workflow_base_branch "$working_branch")"
-  if [[ "$(workflow_branch_created "$working_branch")" != true || -z "$base_branch" || "$working_branch" == "$base_branch" ]]; then
-    fail "current branch must be a workflow working branch with a known base"
+  if is_base_branch "$working_branch"; then
+    fail "cannot deliver from a configured base branch: $working_branch"
+  fi
+  if [[ -n "$DELIVERY_BASE" ]] && ! is_base_branch "$DELIVERY_BASE"; then
+    fail "base is not configured in git.branch.baseBranches: $DELIVERY_BASE"
   fi
 
   if has_local_changes; then
@@ -170,4 +184,50 @@ initialize_delivery() {
   fi
 
   preflight_delivery
+}
+
+resolve_delivery_base() {
+  local open_prs='[]'
+  local resolved
+  if [[ "$INTEGRATION_MODE" == pullRequest ]]; then
+    open_prs="$(gh pr list --state open --head "$working_branch" --limit 1000 --json url,baseRefName)"
+  fi
+  if ! resolved="$(python3 - "$BASE_BRANCHES_JSON" "$DELIVERY_BASE" "$open_prs" "$CURRENT_ACTION" <<'PY'
+import json
+import sys
+
+bases = json.loads(sys.argv[1])
+explicit = sys.argv[2]
+prs = json.loads(sys.argv[3])
+action = sys.argv[4]
+
+def fail(message):
+    print(message)
+    sys.exit(1)
+
+if explicit:
+    prs = [pr for pr in prs if pr["baseRefName"] == explicit]
+if len(prs) > 1:
+    fail("ambiguous open PRs; specify --base <branch>")
+if prs:
+    base = prs[0]["baseRefName"]
+    if base not in bases:
+        fail("PR base is not configured in git.branch.baseBranches: " + base)
+    url = prs[0]["url"]
+else:
+    if action == "pr merge":
+        fail("no open PR for current branch and base")
+    if explicit:
+        base = explicit
+    elif len(bases) == 1:
+        base = bases[0]
+    else:
+        fail("ambiguous delivery base; specify --base <branch>")
+    url = ""
+print(base + "\t" + url)
+PY
+)"; then
+    fail "$resolved"
+  fi
+  IFS=$'\t' read -r base_branch pr_url <<< "$resolved"
 }

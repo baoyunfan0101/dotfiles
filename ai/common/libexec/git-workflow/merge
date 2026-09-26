@@ -6,6 +6,7 @@ source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
 source "$WORKFLOW_ROOT/lib/git-workflow/delivery.sh"
 
 CURRENT_ACTION="merge"
-parse_merge_args "$@"
+parse_delivery_args "$@"
 initialize_delivery localMerge
+resolve_delivery_base
 integrate_local_branch "$working_branch" "$base_branch"

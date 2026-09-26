@@ -30,9 +30,10 @@ def git(*arguments, cwd=None):
 
 
 if args[:2] == ["pr", "list"]:
-    if (state.get("state") == "OPEN" and state["head"] == value("--head")
-            and state["base"] == value("--base")):
-        print(state["url"])
+    prs = json.loads(os.environ.get("GH_EXTRA_PRS", "[]"))
+    if state.get("state") == "OPEN" and state["head"] == value("--head"):
+        prs.append({"url": state["url"], "baseRefName": state["base"]})
+    print(json.dumps(prs))
 elif args[:2] == ["pr", "create"]:
     state = {"state": "OPEN", "head": value("--head"), "base": value("--base"),
              "title": value("--title"), "body": value("--body"),

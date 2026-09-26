@@ -13,17 +13,11 @@ case "${1:-}" in
   *) fail "unknown pr command: $1" ;;
 esac
 CURRENT_ACTION="pr $PR_ACTION"
-case "${1:-}" in
-  -h|--help) pr_usage; exit 0 ;;
-esac
-[[ $# == 0 ]] || fail "unknown option: $1"
+parse_delivery_args "$@"
 
 initialize_delivery pullRequest
 
-find_open_pr() {
-  gh pr list --state open --head "$working_branch" --base "$base_branch" \
-    --json url --jq '.[0].url // empty'
-}
+resolve_delivery_base
 
 if [[ "$PR_ACTION" == submit ]]; then
   push_branch "$working_branch" "$base_branch"
@@ -33,7 +27,6 @@ if [[ "$PR_ACTION" == submit ]]; then
   [[ "$(git rev-list --count "$base_ref..$working_branch")" != 0 ]] || fail "working branch has no commits to submit"
   PR_TITLE="$(branch_summary "$working_branch" "$base_ref")"
   PR_BODY="$(printf '## Summary\n\n'; git log --reverse --format='- %s' "$base_ref..$working_branch")"
-  pr_url="$(find_open_pr)"
   if [[ -z "$pr_url" ]]; then
     pr_url="$(gh pr create --base "$base_branch" --head "$working_branch" --title "$PR_TITLE" --body "$PR_BODY")"
   else
@@ -41,8 +34,6 @@ if [[ "$PR_ACTION" == submit ]]; then
   fi
   printf '[git] pr submit ok target=%s branch=%s url=%s\n' "$base_branch" "$working_branch" "$pr_url"
 else
-  pr_url="$(find_open_pr)"
-  [[ -n "$pr_url" ]] || fail "no open PR for working branch and base; submit requires an explicit user request"
   queue_enabled="$(gh api graphql \
     -f query='query($url: URI!) { resource(url: $url) { ... on PullRequest { isMergeQueueEnabled } } }' \
     -f url="$pr_url" --jq '.data.resource.isMergeQueueEnabled')"
@@ -57,15 +48,17 @@ else
     *) fail "unsupported git.integration.mergeMethod: $INTEGRATION_MERGE_METHOD" ;;
   esac
   gh pr merge "$pr_url" "$merge_flag" --match-head-commit "$(git rev-parse HEAD)"
-  [[ "$(gh pr view "$pr_url" --json state --jq '.state')" == MERGED ]] || fail "PR merge has not completed; workflow state was preserved"
+  [[ "$(gh pr view "$pr_url" --json state --jq '.state')" == MERGED ]] || fail "PR merge has not completed; local Git state was preserved"
   remote="$(remote_for_branch "$working_branch" "$base_branch")"
   git fetch --quiet "$remote" "refs/heads/$base_branch:refs/remotes/$remote/$base_branch"
   git checkout -q "$base_branch"
-  git merge --quiet --ff-only "refs/remotes/$remote/$base_branch"
+  if ! git merge --quiet --ff-only "refs/remotes/$remote/$base_branch"; then
+    git checkout -q "$working_branch"
+    fail "PR merged remotely but base sync failed; local commits and branches were preserved"
+  fi
   if [[ "$DELETE_AFTER_INTEGRATION" == true ]]; then
     delete_delivered_branch "$working_branch" "$base_branch"
   fi
-  clear_workflow_branch "$working_branch"
   printf '[git] pr merge ok target=%s method=%s deleted=%s url=%s\n' \
     "$base_branch" "$INTEGRATION_MERGE_METHOD" "$INTEGRATION_BRANCH_DELETED" "$pr_url"
 fi

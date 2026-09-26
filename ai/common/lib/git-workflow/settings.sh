@@ -20,6 +20,7 @@ load_commit_settings() {
 }
 
 load_delivery_settings() {
+  BASE_BRANCHES_JSON="$(setting git.branch.baseBranches)"
   SYNC_MODE="$(setting git.sync.mode)"
   SYNC_UPDATE_METHOD="$(setting git.sync.updateMethod)"
   INTEGRATION_MODE="$(setting git.integration.mode)"

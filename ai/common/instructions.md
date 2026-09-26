@@ -32,6 +32,8 @@ If `prepare` reports `workflow-disabled`, do not use further workflow commands f
 
 A Task Spec does not define a branch boundary. A working branch may contain multiple Task Specs and atomic commits.
 
+Delivery uses `--base`, an existing PR's base, or the sole configured base. Supply `--base` when ambiguous; it must be configured.
+
 Commit each atomic change by path, as often as needed:
 
 ```bash

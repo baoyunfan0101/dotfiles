@@ -89,7 +89,7 @@ SETTING_DESCRIPTIONS = {
     "git.backup.method": "How selected local changes are protected.",
     "git.commit.mode": "Whether workflow commits and pushes are automatic.",
     "git.branch.mode": "How the working branch is selected.",
-    "git.branch.baseBranches": "Branches treated as bases in fromBase mode.",
+    "git.branch.baseBranches": "Bases used by fromBase branch selection and allowed/default delivery targets.",
     "git.branch.deleteAfterIntegration": "Whether local and remote working branches are deleted after successful integration.",
     "git.integration.mode": "Selects local integration or pull-request delivery.",
     "git.integration.mergeMethod": "How local integration and explicitly authorized PR merges integrate the working branch.",

@@ -71,6 +71,8 @@ Delivery                 -> explicit user authorization
 
 A working branch may contain multiple Task Specs and atomic commits. Task completion, PR submission, and CI success do not authorize merging. PR metadata covers all commits from base to working branch. If `prepare` reports `workflow-disabled`, stop using workflow commands for that work. See `git-workflow --help` and `git-workflow pr --help`.
 
+Existing Git branches need no registration. Delivery chooses `--base`, an existing PR's base, or the sole configured `git.branch.baseBranches` entry. Ambiguous bases require `--base`; configured base branches cannot be delivered.
+
 ## Project Configuration
 
 Project settings are stored in:

@@ -85,7 +85,7 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
         self.assertEqual(result.stdout, "[git] prepare ok backup=none sync=skipped "
-                         "branch=feat/test base=main created=true\n")
+                         "branch=feat/test created=true\n")
 
     def assert_blocked(self, check, reason, required_by, fix, action="prepare"):
         if not action.startswith("pr "):
@@ -106,8 +106,6 @@ class PreflightTests(unittest.TestCase):
         allowed = {"rev-parse --show-toplevel", "rev-parse --is-inside-work-tree"}
         if action.startswith("pr "):
             allowed.update({"symbolic-ref --quiet --short HEAD",
-                            "config --get branch.feat/test.agentWorkflowBase",
-                            "config --bool --get branch.feat/test.agentWorkflowCreated",
                             "diff --quiet --", "diff --cached --quiet --",
                             "ls-files --others --exclude-standard"})
         self.assertTrue(all(call in allowed for call in calls), calls)
@@ -255,8 +253,6 @@ class PreflightTests(unittest.TestCase):
         self.git("add", ".")
         self.git("commit", "-qm", "Configure")
         self.git("checkout", "-qb", "feat/test")
-        self.git("config", "branch.feat/test.agentWorkflowBase", "main")
-        self.git("config", "branch.feat/test.agentWorkflowCreated", "true")
         for action in ("pr submit", "pr merge"):
             self.assert_blocked("gh", "command not found", "git.integration.mode:pullRequest",
                                 "install gh and ensure it is on PATH", action)
@@ -265,24 +261,24 @@ class PreflightTests(unittest.TestCase):
             self.assert_blocked("gh-auth", "authentication failed", "git.integration.mode:pullRequest",
                                 "run gh auth login", action)
 
-    def test_non_workflow_delivery_fails_without_gh(self):
+    def test_base_branch_delivery_fails_without_gh(self):
         self.configure("pullRequest")
         before = {str(p.relative_to(self.repo)): p.read_bytes()
                   for p in self.repo.rglob("*") if p.is_file()}
         result = self.run_action("pr submit")
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("workflow working branch", result.stderr)
+        self.assertIn("configured base branch", result.stderr)
         self.assertEqual(result.stdout, "")
         after = {str(p.relative_to(self.repo)): p.read_bytes()
                  for p in self.repo.rglob("*") if p.is_file()}
         self.assertEqual(before, after)
 
-    def test_non_workflow_delivery_does_not_check_authentication(self):
+    def test_base_branch_delivery_does_not_check_authentication(self):
         self.configure("pullRequest")
         self.stub("gh", f'printf called > {shlex.quote(str(self.root / "gh-called"))}; exit 1')
         result = self.run_action("pr merge")
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("workflow working branch", result.stderr)
+        self.assertIn("configured base branch", result.stderr)
         self.assertFalse((self.root / "gh-called").exists())
 
     def test_commit_and_push_do_not_require_gh(self):

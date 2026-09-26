@@ -6,9 +6,9 @@ Usage:
   git-workflow prepare [--branch-name NAME]
   git-workflow commit [--override-manual] --message MESSAGE (--all | -- PATH...)
   git-workflow push [--override-manual]
-  git-workflow merge [--message MESSAGE]
-  git-workflow pr submit
-  git-workflow pr merge
+  git-workflow merge [--base BRANCH] [--message MESSAGE]
+  git-workflow pr submit [--base BRANCH]
+  git-workflow pr merge [--base BRANCH]
 
 Commands:
   prepare
@@ -23,7 +23,7 @@ Commands:
       the current branch according to project settings.
 
   merge
-      Integrate a workflow-created branch locally only with explicit user
+      Integrate the current branch locally only with explicit user
       authorization. Requires localMerge mode.
 
   pr
@@ -55,6 +55,9 @@ Push options:
       Allow an explicitly requested push when git.commit.mode is manual.
 
 Merge options:
+  --base BRANCH
+      Use a configured delivery base. Required when the base is ambiguous.
+
   --message MESSAGE
       Override the derived squash message or Git's default merge-commit message.
 
@@ -66,8 +69,8 @@ EOF2
 pr_usage() {
   cat <<EOF2
 Usage:
-  git-workflow pr submit
-  git-workflow pr merge
+  git-workflow pr submit [--base BRANCH]
+  git-workflow pr merge [--base BRANCH]
 
 Commands:
   submit
@@ -79,6 +82,8 @@ Commands:
       git.integration.mergeMethod. Sync base and apply configured cleanup.
 
 PR submission, CI success, and task completion do not authorize merging.
+Base: --base, then an existing PR, then the sole configured base.
+Ambiguous bases require --base. Configured base branches cannot be delivered.
 EOF2
 }
 
