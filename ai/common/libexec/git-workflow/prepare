@@ -59,7 +59,12 @@ prepare() {
   load_prepare_settings
 
   create_backup
-  sync_current_branch "$ORIGINAL_BRANCH"
+  if ! sync_current_branch "$ORIGINAL_BRANCH"; then
+    if ! reapply_backup; then
+      fail "sync failed and protected changes could not be restored; backup was retained"
+    fi
+    fail "sync failed; original branch and protected changes were restored"
+  fi
   select_working_branch
   reapply_backup
 

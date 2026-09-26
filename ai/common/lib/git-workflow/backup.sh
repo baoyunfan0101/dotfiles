@@ -108,7 +108,6 @@ create_commit_backup_ref() {
   tmp_index="$(mktemp "${TMPDIR:-/tmp}/agent-workflow-index.XXXXXX")"
   rm -f "$tmp_index"
 
-
   GIT_INDEX_FILE="$tmp_index" git read-tree HEAD
 
   case "$BACKUP_MODE" in
@@ -202,7 +201,7 @@ reapply_backup() {
     return 0
   fi
 
-  git stash apply --index "$BACKUP_TRANSPORT_SHA" >/dev/null
+  git stash apply --index "$BACKUP_TRANSPORT_SHA" >/dev/null || return $?
 
   if [[ "$BACKUP_TRANSPORT_KEEP" == false ]]; then
     stash_name="$(stash_name_for_sha "$BACKUP_TRANSPORT_SHA" || true)"

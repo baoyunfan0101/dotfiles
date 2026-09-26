@@ -95,6 +95,29 @@ class WorkflowTests(unittest.TestCase):
                 {str(path.relative_to(self.repo)): path.read_bytes()
                  for path in self.repo.rglob("*") if path.is_file() and ".git" not in path.relative_to(self.repo).parts})
 
+    def assert_no_in_progress_git_operation(self):
+        for name in ("MERGE_HEAD", "rebase-merge", "rebase-apply"):
+            self.assertFalse((self.repo / ".git" / name).exists(), name)
+        self.assertEqual(self.git("ls-files", "--unmerged"), "")
+
+    def diverge_main_with_conflict(self):
+        sequence = getattr(self, "conflict_sequence", 0) + 1
+        self.conflict_sequence = sequence
+        upstream = Path(tempfile.mkdtemp(dir=self.root))
+        subprocess.check_call(["git", "clone", "-q", "-b", "main", str(self.remote), str(upstream)],
+                              env=self.env)
+        (self.repo / "tracked").write_text(f"local conflict {sequence}\n")
+        self.git("add", "tracked")
+        self.git("commit", "-qm", "Local conflicting change")
+        local_head = self.git("rev-parse", "HEAD")
+        (upstream / "tracked").write_text(f"remote conflict {sequence}\n")
+        subprocess.check_call(["git", "-C", str(upstream), "add", "tracked"], env=self.env)
+        subprocess.check_call(["git", "-C", str(upstream), "commit", "-qm", "Remote conflicting change"],
+                              env=self.env)
+        subprocess.check_call(["git", "-C", str(upstream), "push", "-q", "origin", "main"],
+                              env=self.env)
+        return local_head, self.git("ls-remote", "--heads", "origin", "main")
+
     def existing_branch(self, mode="pullRequest", bases=("main",), branch_mode="current"):
         self.stub_gh()
         self.save_settings(integration={"mode": mode},
@@ -150,6 +173,32 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.git("branch", "--show-current"), "fix/manual")
         self.assertEqual(self.git("rev-parse", "HEAD"), original)
         self.assertEqual(self.git("rev-parse", "main"), local_base)
+
+    def test_local_base_conflicting_sync_restores_working_branch(self):
+        for method in ("rebase", "merge"):
+            with self.subTest(method=method):
+                self.save_settings(sync={"mode": "update", "updateMethod": method})
+                self.git("push", "-q", "origin", "main")
+                self.git("switch", "-c", f"fix/sync-{method}")
+                (self.repo / "feature").write_text("working change\n")
+                self.git("add", "feature")
+                self.git("commit", "-qm", "Working change")
+                working_head = self.git("rev-parse", "HEAD")
+                self.git("switch", "main")
+                base_head, remote_base = self.diverge_main_with_conflict()
+                self.git("switch", f"fix/sync-{method}")
+
+                result = self.run_cli("merge", ok=False)
+                self.assertIn("base sync failed", result.stderr)
+                self.assertEqual(self.git("branch", "--show-current"), f"fix/sync-{method}")
+                self.assertEqual(self.git("rev-parse", "HEAD"), working_head)
+                self.assertEqual(self.git("rev-parse", "main"), base_head)
+                self.assertEqual(self.git("ls-remote", "--heads", "origin", "main"), remote_base)
+                self.assertEqual(self.git("status", "--porcelain"), "")
+                self.assert_no_in_progress_git_operation()
+                self.assertTrue(self.git("branch", "--list", f"fix/sync-{method}"))
+                self.git("switch", "main")
+                self.git("reset", "--hard", "-q", "origin/main")
 
     def test_pr_base_resolution_and_disambiguation(self):
         self.existing_branch(bases=("main", "develop"))
@@ -386,6 +435,79 @@ class WorkflowTests(unittest.TestCase):
                     self.assertEqual(self.git("rev-parse", "origin/main"), remote_tip)
                 self.git("fetch", "-q", "origin")
                 self.git("merge", "--ff-only", remote_tip)
+
+    def test_conflicting_sync_restores_original_head(self):
+        for method in ("rebase", "merge"):
+            with self.subTest(method=method):
+                self.save_settings(sync={"mode": "update", "updateMethod": method},
+                                   backup={"mode": "none"}, branch={"mode": "current"})
+                self.git("push", "-q", "origin", "main")
+                local_head, remote_head = self.diverge_main_with_conflict()
+
+                result = self.run_cli("prepare", ok=False)
+                self.assertIn("sync failed", result.stderr)
+                self.assertEqual(self.git("branch", "--show-current"), "main")
+                self.assertEqual(self.git("rev-parse", "HEAD"), local_head)
+                self.assertEqual(self.git("ls-remote", "--heads", "origin", "main"), remote_head)
+                self.assertEqual(self.git("status", "--porcelain"), "")
+                self.assert_no_in_progress_git_operation()
+                self.git("reset", "--hard", "-q", "origin/main")
+
+    def test_prepare_sync_conflict_reapplies_protected_changes(self):
+        for update_method in ("ffOnly", "rebase", "merge"):
+            for backup_method in ("stash", "commit"):
+                with self.subTest(update_method=update_method, backup_method=backup_method):
+                    self.save_settings(sync={"mode": "update", "updateMethod": update_method},
+                                       backup={"mode": "all", "method": backup_method},
+                                       branch={"mode": "current"})
+                    if not (self.repo / "staged").exists():
+                        (self.repo / "staged").write_text("original staged\n")
+                        (self.repo / "unstaged").write_text("original unstaged\n")
+                        self.git("add", "staged", "unstaged")
+                        self.git("commit", "-qm", "Add change targets")
+                    self.git("push", "-q", "origin", "main")
+                    local_head, remote_head = self.diverge_main_with_conflict()
+                    (self.repo / "staged").write_text("user staged\n")
+                    self.git("add", "staged")
+                    (self.repo / "unstaged").write_text("user unstaged\n")
+                    (self.repo / "untracked").write_text("user untracked\n")
+                    original_status = self.git("status", "--porcelain")
+
+                    result = self.run_cli("prepare", ok=False)
+                    self.assertIn("sync failed", result.stderr)
+                    self.assertEqual(self.git("branch", "--show-current"), "main")
+                    self.assertEqual(self.git("rev-parse", "HEAD"), local_head)
+                    self.assertEqual(self.git("ls-remote", "--heads", "origin", "main"), remote_head)
+                    self.assertEqual(self.git("status", "--porcelain"), original_status)
+                    self.assertEqual((self.repo / "staged").read_text(), "user staged\n")
+                    self.assertEqual((self.repo / "unstaged").read_text(), "user unstaged\n")
+                    self.assertEqual((self.repo / "untracked").read_text(), "user untracked\n")
+                    self.assert_no_in_progress_git_operation()
+                    self.git("reset", "--hard", "-q", "origin/main")
+                    (self.repo / "untracked").unlink()
+
+    def test_prepare_keeps_transport_backup_when_reapply_fails(self):
+        self.save_settings(sync={"mode": "update", "updateMethod": "merge"},
+                           backup={"mode": "all", "method": "commit"},
+                           branch={"mode": "current"})
+        self.git("push", "-q", "origin", "main")
+        local_head, _ = self.diverge_main_with_conflict()
+        (self.repo / "user-change").write_text("protected\n")
+        self.git("add", "user-change")
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text(f'#!/usr/bin/env bash\n'
+                            f'if [[ "$1" == stash && "$2" == apply ]]; then exit 1; fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        git_stub.chmod(0o755)
+
+        result = self.run_cli("prepare", ok=False)
+        self.assertIn("backup was retained", result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), local_head)
+        self.assert_no_in_progress_git_operation()
+        self.assertTrue(self.git("stash", "list"))
+        self.assertTrue(self.git("for-each-ref", "--format=%(refname)",
+                                 "refs/agent-workflow/backups/"))
 
     def merge_local(self, method, cleanup):
         self.save_settings(integration={"mergeMethod": method}, branch={"deleteAfterIntegration": cleanup})

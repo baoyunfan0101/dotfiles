@@ -104,7 +104,7 @@ integrate_local_branch() {
 
   git checkout -q "$base_branch"
   if ! sync_current_branch "$base_branch"; then
-    git checkout -q "$working_branch"
+    git checkout -q "$working_branch" || fail "base sync failed and working branch checkout failed"
     fail "base sync failed; current branch and commits were preserved"
   fi
 
