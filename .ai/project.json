@@ -21,7 +21,7 @@
       "deleteAfterIntegration": false
     },
     "integration": {
-      "mode": "localMerge",
+      "mode": "pullRequest",
       "mergeMethod": "mergeCommit"
     }
   }
