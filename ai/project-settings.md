@@ -1,6 +1,6 @@
 # Project Settings
 
-This reference describes project-specific behavior for `start`, `commit`, and `finish`, plus the auxiliary `push` command. Project settings are stored in:
+This reference describes development (`prepare`, `commit`, `push`) and explicitly authorized delivery (`merge`, `pr submit`, `pr merge`). Project settings are stored in:
 
 ```text
 <repository>/.ai/project.json
@@ -100,11 +100,11 @@ Single-setting `set` and `unset` remain supported. An agent can translate a natu
 | Area | Purpose |
 |---|---|
 | `workflow` | Whether this repository uses `git-workflow`. |
-| `git.sync` | Repository synchronization during `start` and local-merge `finish`. |
-| `git.backup` | Protect local changes during `start`. |
+| `git.sync` | Repository synchronization during `prepare` and local integration. |
+| `git.backup` | Protect local changes during `prepare`. |
 | `git.commit` | Commit and push policy. |
-| `git.branch` | Task-branch policy. |
-| `git.integration` | Integration strategy used by `finish`. |
+| `git.branch` | Working-branch policy. |
+| `git.integration` | Local integration or pull-request delivery, and merge method. |
 
 ### `schemaVersion`
 
@@ -143,7 +143,7 @@ Supported values:
 | Value | Meaning |
 |---|---|
 | `false` | Workflow commands skip without performing task workflow operations. |
-| `true` | Repository-changing tasks use the configured `start -> commit* -> finish` lifecycle. |
+| `true` | Repository-changing work uses `prepare -> edit -> commit*`; delivery requires explicit authorization. |
 
 Enable the workflow for the current repository:
 
@@ -163,13 +163,13 @@ Write the current default `false` explicitly:
 agent-project unset workflow.enabled
 ```
 
-When disabled, `git-workflow start`, `commit`, `push`, and `finish` return `skip reason=workflow-disabled`. Delivery-specific checks such as GitHub CLI authentication are not performed.
+When disabled, development and delivery commands return `skip reason=workflow-disabled`. Delivery-specific checks such as GitHub CLI authentication are not performed.
 
 ## Git synchronization
 
 ### `git.sync.mode`
 
-Controls synchronization of the current branch during `start` and the base branch during a local-merge `finish`.
+Controls synchronization of the current branch during `prepare` and the base branch during local `merge`. After a successful PR merge, the base is always fetched and fast-forwarded to the remote result.
 
 Default:
 
@@ -213,7 +213,7 @@ This setting has no effect when `git.sync.mode` is `"none"` or `"fetch"`.
 
 ## Git backup
 
-Before synchronization or branch selection, `git-workflow start` can preserve local changes and then restore them afterward.
+Before synchronization or branch selection, `git-workflow prepare` can preserve local changes and then restore them afterward.
 
 ### `git.backup.mode`
 
@@ -251,7 +251,7 @@ Supported values:
 | Value | Meaning |
 |---|---|
 | `"stash"` | Store the backup as a Git stash. The backup stash remains available after the changes are reapplied. |
-| `"commit"` | Store the backup as a commit referenced under `refs/agent-workflow/backups/`. A temporary stash transports working-tree changes during `git-workflow start`. |
+| `"commit"` | Store the backup as a commit referenced under `refs/agent-workflow/backups/`. A temporary stash transports working-tree changes during `git-workflow prepare`. |
 
 This setting has no effect when:
 
@@ -299,7 +299,7 @@ A manually overridden commit is not automatically pushed.
 
 ### `git.branch.mode`
 
-Controls whether `git-workflow start` creates a task branch.
+Controls whether `git-workflow prepare` creates a working branch.
 
 Default:
 
@@ -311,17 +311,17 @@ Supported values:
 
 | Value | Meaning |
 |---|---|
-| `"current"` | Continue working on the current branch. Never create a task branch automatically. |
-| `"alwaysCreate"` | Always create a new task branch during `git-workflow start`. |
-| `"fromBase"` | Create a new task branch only when the current branch is listed in `git.branch.baseBranches`. Otherwise continue on the current branch. |
+| `"current"` | Continue working on the current branch. Never create a working branch automatically. |
+| `"alwaysCreate"` | Always create a new working branch during `git-workflow prepare`. |
+| `"fromBase"` | Create a new working branch only when the current branch is listed in `git.branch.baseBranches`. Otherwise continue on the current branch. |
 
-When the selected mode requires a new branch, `git-workflow start` must receive a candidate branch name:
+When the selected mode requires a new branch, `git-workflow prepare` must receive a candidate branch name:
 
 ```bash
-git-workflow start --branch-name <candidate-branch>
+git-workflow prepare --branch-name <candidate-branch>
 ```
 
-Branches created by `git-workflow start` are marked with Git configuration metadata so that `git-workflow finish` can recognize the task and its base branch.
+A working branch is an ordinary Git branch and may contain multiple Task Specs and atomic commits. Existing branches work with `current` and `fromBase`; a new Task Spec does not by itself select a new branch. Delivery resolves its base when requested.
 
 ### `git.branch.baseBranches`
 
@@ -349,11 +349,11 @@ When:
 
 the list must not be empty.
 
-This setting primarily affects `git.branch.mode = "fromBase"`.
+This list controls `fromBase` branch selection and the allowed/default delivery bases. Delivery uses explicit `--base`, then an existing PR's base for PR operations, then the sole configured base. Multiple possibilities require `--base`; bases outside this list are rejected. A configured base branch cannot itself be delivered.
 
 ### `git.branch.deleteAfterIntegration`
 
-Controls whether a workflow-created task branch is deleted after successful local integration.
+Controls whether the working branch is deleted after successful local integration or PR merge.
 
 Default:
 
@@ -365,34 +365,30 @@ Supported values:
 
 | Value | Meaning |
 |---|---|
-| `false` | Keep the task branch after integration. |
-| `true` | Delete the integrated task branch locally and delete its remote branch when the remote branch exists. |
+| `false` | Keep the working branch after integration. |
+| `true` | Delete the integrated working branch locally and delete its remote branch when the remote branch exists. |
 
-This setting applies to:
+This setting applies to both integration modes. PR submission keeps the branch.
 
-```json
-"git.integration.mode": "localMerge"
-```
+When squash integration is used, the local working branch is force-deleted because its commits are not direct ancestors of the resulting squash commit.
 
-When squash integration is used, the local task branch is force-deleted because its commits are not direct ancestors of the resulting squash commit.
+## Delivery
 
-## Finish integration strategy
-
-The normal task-completion command is:
+Delivery requires explicit user authorization:
 
 ```bash
-git-workflow finish
+git-workflow pr submit [--base <branch>]
+git-workflow pr merge [--base <branch>]
+git-workflow merge [--base <branch>]
 ```
 
-`finish` selects `localMerge` or `pullRequest` through `git.integration.mode`. These are strategies for the same lifecycle action.
+Use `pr submit` only when the user requests PR submission or an update, `pr merge` only when they approve merging the PR, and `merge` only when they authorize local integration. Completing a Task Spec or commit does not authorize delivery. PR submission and CI success do not authorize merging.
 
-If the current branch was not created by `git-workflow start`, `git-workflow finish` skips the task.
-
-The working tree must be clean when `finish` has a task to deliver.
+Delivery requires a non-base current branch, a resolvable configured base, and a clean working tree. Successful integration syncs the base and applies branch cleanup.
 
 ### `git.integration.mode`
 
-Selects the integration strategy used by `git-workflow finish`.
+Selects local integration or pull-request delivery.
 
 Default:
 
@@ -404,28 +400,18 @@ Supported values:
 
 | Value | Meaning |
 |---|---|
-| `"localMerge"` | Check out the original base branch, synchronize it, integrate the task branch locally, and push the resulting base branch. |
-| `"pullRequest"` | Push the task branch and create or reuse a GitHub pull request targeting the original base branch. |
+| `"localMerge"` | Check out the original base branch, synchronize it, integrate the working branch locally, and push the resulting base branch. |
+| `"pullRequest"` | `pr submit` creates or updates a PR; separately authorized `pr merge` merges it. |
 
-`"pullRequest"` mode requires the GitHub CLI (`gh`) and authentication at `start` and when `finish` has a workflow-created task to deliver. A skipped `finish` does not require GitHub dependencies.
+PR commands require `gh` and authentication. Development commands do not. `merge` rejects pullRequest mode; PR commands reject localMerge mode.
 
-`git-workflow finish` derives the title from the sole task commit's subject, or from the task branch name for other commit counts. `--title` overrides it; the body is optional.
+`pr submit` finds open PRs for the current head and resolves the base before pushing. Without `--base`, a single existing PR supplies its base after validation; multiple PRs require explicit selection. It generates the title from the sole commit subject or, for multiple commits, from the working branch name. The body lists all `base..working-branch` subjects oldest first under `## Summary`. Repeated submission updates the same PR using the complete history.
 
-Optional PR metadata overrides:
-
-```bash
-git-workflow finish \
-  --title "Add project settings documentation" \
-  --body "Document all supported project settings."
-```
+`pr merge` requires an existing open PR and never creates one or enables auto-merge. It rejects merge queues, checks that the PR head matches the current commit, and confirms the PR has merged before syncing the base and cleaning up.
 
 ### `git.integration.mergeMethod`
 
-Controls how a task branch is integrated when:
-
-```json
-"git.integration.mode": "localMerge"
-```
+Controls how local integration and explicitly authorized PR merges integrate the working branch.
 
 Default:
 
@@ -437,18 +423,18 @@ Supported values:
 
 | Value | Meaning |
 |---|---|
-| `"mergeCommit"` | Merge the task branch using a merge commit. Fast-forward-only integration is not used. |
-| `"squash"` | Squash all changes from the task branch into a single commit on the base branch. |
+| `"mergeCommit"` | Merge the working branch using a merge commit. Fast-forward-only integration is not used. |
+| `"squash"` | Squash all changes from the working branch into a single commit on the base branch. |
 
 For `"mergeCommit"`, Git generates the normal merge commit message unless `--message` overrides it.
 
-For `"squash"`, the message defaults to the sole task commit's subject, or to a summary derived from the task branch name. `--message` overrides it. For example, `feat/ai-harness-preflight` becomes `feat(ai): harness preflight`; names outside that convention are kept unchanged.
+For `"squash"`, the message defaults to the sole branch commit's subject, or to a summary derived from the working branch name. `--message` overrides it. For example, `feat/ai-harness-preflight` becomes `feat(ai): harness preflight`; names outside that convention are kept unchanged.
 
 Optional message override for either local merge method:
 
 ```bash
-git-workflow finish \
+git-workflow merge \
   --message "docs(ai): document project settings"
 ```
 
-This setting does not control how a GitHub pull request is ultimately merged when `git.integration.mode` is `"pullRequest"`.
+For PR merging, `mergeCommit` maps to `gh pr merge --merge` and `squash` maps to `gh pr merge --squash`.

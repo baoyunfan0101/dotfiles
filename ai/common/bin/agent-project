@@ -85,14 +85,14 @@ SETTING_DESCRIPTIONS = {
     "workflow.enabled": "Whether this repository uses git-workflow.",
     "git.sync.mode": "Synchronization performed before workflow operations.",
     "git.sync.updateMethod": "How an upstream update is applied.",
-    "git.backup.mode": "Local changes protected when a task starts.",
+    "git.backup.mode": "Local changes protected during repository preparation.",
     "git.backup.method": "How selected local changes are protected.",
     "git.commit.mode": "Whether workflow commits and pushes are automatic.",
-    "git.branch.mode": "How the task branch is selected.",
-    "git.branch.baseBranches": "Branches treated as bases in fromBase mode.",
-    "git.branch.deleteAfterIntegration": "Whether local and remote task branches are deleted after local integration.",
-    "git.integration.mode": "Integration strategy used by finish.",
-    "git.integration.mergeMethod": "How a local merge integrates the task branch.",
+    "git.branch.mode": "How the working branch is selected.",
+    "git.branch.baseBranches": "Bases used by fromBase branch selection and allowed/default delivery targets.",
+    "git.branch.deleteAfterIntegration": "Whether local and remote working branches are deleted after successful integration.",
+    "git.integration.mode": "Selects local integration or pull-request delivery.",
+    "git.integration.mergeMethod": "How local integration and explicitly authorized PR merges integrate the working branch.",
 }
 
 SETTING_CONSTRAINTS = {

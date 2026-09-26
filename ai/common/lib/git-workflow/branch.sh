@@ -20,7 +20,7 @@ raise SystemExit(0 if branch in base_branches else 1)
 PY
 }
 
-create_task_branch() {
+create_working_branch() {
   if [[ -z "$BRANCH_NAME" ]]; then
     fail "--branch-name is required by the configured branch mode"
   fi
@@ -35,7 +35,6 @@ create_task_branch() {
 
   git checkout -q -b "$BRANCH_NAME"
   BRANCH_CREATED=true
-  mark_workflow_branch "$BRANCH_NAME" "$ORIGINAL_BRANCH"
 }
 
 select_working_branch() {
@@ -43,11 +42,11 @@ select_working_branch() {
     current)
       ;;
     alwaysCreate)
-      create_task_branch
+      create_working_branch
       ;;
     fromBase)
       if is_base_branch "$ORIGINAL_BRANCH"; then
-        create_task_branch
+        create_working_branch
       fi
       ;;
     *)

@@ -6,7 +6,7 @@ setting() {
   agent-project get "$1"
 }
 
-load_start_settings() {
+load_prepare_settings() {
   BACKUP_MODE="$(setting git.backup.mode)"
   BACKUP_METHOD="$(setting git.backup.method)"
   SYNC_MODE="$(setting git.sync.mode)"
@@ -19,7 +19,8 @@ load_commit_settings() {
   COMMIT_MODE="$(setting git.commit.mode)"
 }
 
-load_finish_settings() {
+load_delivery_settings() {
+  BASE_BRANCHES_JSON="$(setting git.branch.baseBranches)"
   SYNC_MODE="$(setting git.sync.mode)"
   SYNC_UPDATE_METHOD="$(setting git.sync.updateMethod)"
   INTEGRATION_MODE="$(setting git.integration.mode)"

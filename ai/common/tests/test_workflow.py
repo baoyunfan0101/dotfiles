@@ -67,8 +67,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)
         return result
 
-    def start(self):
-        return self.run_cli("start", "--branch-name", "feat/test")
+    def prepare(self):
+        return self.run_cli("prepare", "--branch-name", "feat/test")
 
     def change(self, name="tracked"):
         (self.repo / name).write_text("changed\n")
@@ -76,46 +76,176 @@ class WorkflowTests(unittest.TestCase):
     def commit(self, *paths):
         return self.run_cli("commit", "--message", "Change", "--", *(paths or ("tracked",)))
 
-    def stub_gh(self, existing=False):
+    def stub_gh(self):
         path = self.bin / "gh"
-        path.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$GH_LOG"\n'
-                        'case "$*" in\n"auth status") exit 0;;\n'
-                        f'"pr view "*) {"echo https://example.invalid/pr/1" if existing else "exit 1"};;\n'
-                        '"pr create "*) echo https://example.invalid/pr/1;;\n*) exit 2;;\nesac\n')
+        shutil.copyfile(COMMON / "tests/stubs/gh-pr", path)
         path.chmod(0o755)
         self.env["GH_LOG"] = str(self.root / "gh.log")
+        self.env["GH_STATE"] = str(self.root / "pr.json")
+
+    def gh_calls(self):
+        log = Path(self.env["GH_LOG"])
+        return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+    def git_snapshot(self):
+        return (self.git("branch", "--show-current"), self.git("rev-parse", "HEAD"),
+                self.git("status", "--porcelain"),
+                self.git("for-each-ref", "--format=%(refname) %(objectname)", "refs/heads"),
+                self.git("ls-remote", "--heads", "origin"),
+                {str(path.relative_to(self.repo)): path.read_bytes()
+                 for path in self.repo.rglob("*") if path.is_file() and ".git" not in path.relative_to(self.repo).parts})
+
+    def existing_branch(self, mode="pullRequest", bases=("main",), branch_mode="current"):
+        self.stub_gh()
+        self.save_settings(integration={"mode": mode},
+                           branch={"mode": branch_mode, "baseBranches": list(bases)})
+        self.git("push", "-q", "origin", "main")
+        for base in bases:
+            if base != "main":
+                self.git("branch", base)
+                self.git("push", "-q", "origin", base)
+        self.git("switch", "-c", "fix/manual")
+        result = self.run_cli("prepare")
+        self.assertIn("created=false", result.stdout)
+        self.assertNotIn("base=", result.stdout)
+        self.change()
+        self.commit()
+        self.run_cli("push")
+
+    def test_existing_current_branch_pr_delivery(self):
+        self.existing_branch()
+        self.run_cli("pr", "submit")
+        self.assertEqual(json.loads(Path(self.env["GH_STATE"]).read_text())["base"], "main")
+        self.run_cli("pr", "merge")
+        self.assertEqual(self.git("branch", "--show-current"), "main")
+
+    def test_existing_from_base_branch_is_reused(self):
+        self.existing_branch(branch_mode="fromBase")
+        self.run_cli("pr", "submit")
+        self.assertEqual(self.git("branch", "--show-current"), "fix/manual")
+
+    def test_current_branch_local_delivery(self):
+        self.existing_branch(mode="localMerge")
+        self.run_cli("merge")
+        self.assertEqual(self.git("branch", "--show-current"), "main")
+
+    def test_multiple_local_bases_require_explicit_base(self):
+        self.existing_branch(mode="localMerge", bases=("main", "develop"))
+        before = self.git_snapshot()
+        self.assertIn("ambiguous", self.run_cli("merge", ok=False).stderr)
+        self.assertEqual(before, self.git_snapshot())
+        self.run_cli("merge", "--base", "develop")
+        self.assertEqual(self.git("branch", "--show-current"), "develop")
+
+    def test_local_base_sync_failure_keeps_current_branch(self):
+        self.existing_branch(mode="localMerge")
+        self.save_settings(sync={"mode": "update", "updateMethod": "ffOnly"})
+        original = self.git("rev-parse", "HEAD")
+        local_base = self.git("commit-tree", "main^{tree}", "-p", "main", "-m", "Local base advance")
+        self.git("update-ref", "refs/heads/main", local_base)
+        remote_base = self.git("--git-dir", str(self.remote), "commit-tree", "main^{tree}",
+                               "-p", "main", "-m", "Remote base advance")
+        self.git("--git-dir", str(self.remote), "update-ref", "refs/heads/main", remote_base)
+        self.assertIn("base sync failed", self.run_cli("merge", ok=False).stderr)
+        self.assertEqual(self.git("branch", "--show-current"), "fix/manual")
+        self.assertEqual(self.git("rev-parse", "HEAD"), original)
+        self.assertEqual(self.git("rev-parse", "main"), local_base)
+
+    def test_pr_base_resolution_and_disambiguation(self):
+        self.existing_branch(bases=("main", "develop"))
+        before = self.git_snapshot()
+        self.assertIn("ambiguous", self.run_cli("pr", "submit", ok=False).stderr)
+        self.assertEqual(before, self.git_snapshot())
+        self.run_cli("pr", "submit", "--base", "develop")
+        self.run_cli("pr", "submit")
+        state_path = Path(self.env["GH_STATE"])
+        self.assertEqual(json.loads(state_path.read_text())["base"], "develop")
+        self.env["GH_EXTRA_PRS"] = json.dumps([{"url": "https://example.invalid/pr/2", "baseRefName": "main"}])
+        for action in ("submit", "merge"):
+            before = self.git_snapshot()
+            self.assertIn("ambiguous", self.run_cli("pr", action, ok=False).stderr)
+            self.assertEqual(before, self.git_snapshot())
+        self.run_cli("pr", "submit", "--base=develop")
+        self.run_cli("pr", "merge", "--base", "develop")
+        self.assertEqual(self.git("branch", "--show-current"), "develop")
+        self.assertEqual(sum(call[:2] == ["pr", "create"] for call in self.gh_calls()), 1)
+
+    def test_existing_pr_base_overrides_multiple_configured_defaults(self):
+        self.existing_branch(bases=("main", "develop"))
+        self.run_cli("pr", "submit", "--base", "develop")
+        self.run_cli("pr", "merge")
+        self.assertEqual(self.git("branch", "--show-current"), "develop")
+
+    def test_unconfigured_pr_base_fails_without_mutation(self):
+        self.existing_branch()
+        self.env["GH_EXTRA_PRS"] = json.dumps([{"url": "https://example.invalid/pr/2", "baseRefName": "outside"}])
+        for action in ("submit", "merge"):
+            before = self.git_snapshot()
+            self.assertIn("PR base is not configured", self.run_cli("pr", action, ok=False).stderr)
+            self.assertEqual(before, self.git_snapshot())
+        self.run_cli("pr", "submit", "--base", "main")
+        self.assertEqual(json.loads(Path(self.env["GH_STATE"]).read_text())["base"], "main")
+
+    def test_invalid_explicit_bases_fail_before_mutation(self):
+        self.existing_branch()
+        for action in ("submit", "merge"):
+            before = self.git_snapshot()
+            self.assertIn("base is not configured", self.run_cli("pr", action, "--base", "outside", ok=False).stderr)
+            self.assertEqual(before, self.git_snapshot())
+        self.assertEqual(self.gh_calls(), [])
+        self.save_settings(integration={"mode": "localMerge"})
+        before = self.git_snapshot()
+        self.assertIn("base is not configured", self.run_cli("merge", "--base", "outside", ok=False).stderr)
+        self.assertEqual(before, self.git_snapshot())
+
+    def test_all_configured_base_branches_reject_delivery(self):
+        for mode, actions in (("localMerge", [("merge",)]),
+                              ("pullRequest", [("pr", "submit"), ("pr", "merge")])):
+            self.save_settings(integration={"mode": mode}, branch={"baseBranches": ["main", "develop"]})
+            for action in actions:
+                before = self.git_snapshot()
+                self.assertIn("configured base branch", self.run_cli(*action, "--base", "develop", ok=False).stderr)
+                self.assertEqual(before, self.git_snapshot())
 
     def test_command_help_and_dispatch(self):
         help_text = self.run_cli("--help").stdout
         self.assertEqual(set(re.findall(r"^  ([a-z]+)$", help_text, re.MULTILINE)),
-                         {"start", "commit", "finish", "push"})
-        for meaning in ("once before editing", "after editing", "--message MESSAGE",
-                        "-- PATH...", "outside commit", "when a workflow-created task",
-                        "local", "pull request", "--branch-name NAME", "--title TITLE"):
+                         {"prepare", "commit", "merge", "push", "pr"})
+        for meaning in ("before editing", "after editing", "--message MESSAGE",
+                        "-- PATH...", "outside commit", "current branch",
+                        "local", "pull request", "--branch-name NAME"):
             self.assertIn(meaning, help_text)
-        for action in ("start", "commit", "finish", "push"):
+        for action in ("prepare", "commit", "merge", "push"):
             self.assertIn("Usage:", self.run_cli(action, "--help").stdout)
             self.assertIn(f"[git] {action} error", self.run_cli(action, "--invalid", ok=False).stderr)
-        self.assertIn("no-workflow-created-branch", self.run_cli("finish").stdout)
+        self.assertIn("configured base branch", self.run_cli("merge", ok=False).stderr)
+        pr_help = self.run_cli("pr", "--help").stdout
+        self.assertEqual(set(re.findall(r"^  ([a-z]+)$", pr_help, re.MULTILINE)), {"submit", "merge"})
+        for command in ("start", "finish"):
+            self.assertIn("unknown command", self.run_cli(command, ok=False).stderr)
+        self.run_cli("pr", "unknown", ok=False)
+        self.run_cli("pr", "submit", "--title", "No override", ok=False)
 
     def test_disabled_or_unconfigured_project_skips_workflow(self):
         path = self.repo / ".ai/project.json"
         path.unlink()
 
         for action, arguments in (
-            ("start", ("--branch-name", "feat/test")),
+            ("prepare", ("--branch-name", "feat/test")),
             ("commit", ("--message", "Change", "--all")),
             ("push", ()),
-            ("finish", ()),
+            ("merge", ()),
+            ("pr", ("submit",)),
+            ("pr", ("merge",)),
         ):
             result = self.run_cli(action, *arguments)
             self.assertEqual(
                 result.stdout,
-                f"[git] {action} skip reason=workflow-disabled\n",
+                f"[git] {action + ' ' + arguments[0] if action == 'pr' else action} skip reason=workflow-disabled\n",
             )
 
     def test_command_executables(self):
-        for action in ("start", "commit", "finish", "push"):
+        for action in ("prepare", "commit", "merge", "push", "pr"):
             path = COMMON / "libexec/git-workflow" / action
             self.assertTrue(os.access(path, os.X_OK))
             self.assertEqual(path.read_text().splitlines()[0], "#!/usr/bin/env bash")
@@ -155,11 +285,17 @@ class WorkflowTests(unittest.TestCase):
         )
 
         installed = destination / ".local/bin/git-workflow"
-        self.assertIn("[git] start ok", self.run_cli("start", "--branch-name", "feat/test", executable=installed).stdout)
+        for command in ("prepare", "commit", "push", "merge", "pr"):
+            self.assertTrue(os.access(destination / ".local/libexec/git-workflow" / command, os.X_OK))
+        for command in ("start", "finish"):
+            self.assertFalse((destination / ".local/libexec/git-workflow" / command).exists())
+        for action in ("submit", "merge"):
+            self.assertIn("Usage:", self.run_cli("pr", action, "--help", executable=installed).stdout)
+        self.assertIn("[git] prepare ok", self.run_cli("prepare", "--branch-name", "feat/test", executable=installed).stdout)
         self.change()
         self.run_cli("commit", "--message", "Installed", "--all", executable=installed)
         self.run_cli("push", executable=installed)
-        self.run_cli("finish", executable=installed)
+        self.run_cli("merge", executable=installed)
         for path in (destination / ".local/lib/git-workflow").glob("*.sh"):
             self.assertFalse(path.stat().st_mode & 0o111)
 
@@ -170,7 +306,7 @@ class WorkflowTests(unittest.TestCase):
         self.check_install("--copy")
 
     def test_atomic_paths_and_automatic_push(self):
-        self.start()
+        self.prepare()
         self.change()
         self.change("other")
         self.git("add", "other")
@@ -181,7 +317,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/feat/test"))
 
     def test_all_and_invalid_commit(self):
-        self.start()
+        self.prepare()
         self.change()
         self.change("other")
         self.run_cli("commit", "--message", "All", "--all")
@@ -192,7 +328,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_manual_commit_and_push(self):
         self.save_settings(commit={"mode": "manual"})
-        self.start()
+        self.prepare()
         self.change()
         before = self.git("rev-parse", "HEAD")
         self.assertIn("skip reason=manual", self.commit().stdout)
@@ -204,7 +340,7 @@ class WorkflowTests(unittest.TestCase):
         self.run_cli("push", "--override-manual")
         self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/feat/test"))
 
-    def test_start_backup_modes_and_methods(self):
+    def test_prepare_backup_modes_and_methods(self):
         for method in ("stash", "commit"):
             for mode in ("none", "tracked", "untracked", "all"):
                 with self.subTest(method=method, mode=mode):
@@ -213,7 +349,7 @@ class WorkflowTests(unittest.TestCase):
                     self.git("add", "tracked")
                     self.change("other")
                     status = self.git("status", "--porcelain")
-                    result = self.start()
+                    result = self.prepare()
                     self.assertIn(f"backup={method if mode != 'none' else 'none'}", result.stdout)
                     self.assertEqual(self.git("status", "--porcelain"), status)
                     self.assertEqual((self.repo / "tracked").read_text(), "changed\n")
@@ -224,15 +360,14 @@ class WorkflowTests(unittest.TestCase):
                     self.git("restore", "--staged", "--worktree", "tracked")
                     (self.repo / "other").unlink()
 
-    def test_start_branch_modes(self):
+    def test_prepare_branch_modes(self):
         self.save_settings(branch={"mode": "current"})
-        self.assertIn("created=false", self.start().stdout)
+        self.assertIn("created=false", self.prepare().stdout)
         self.assertEqual(self.git("branch", "--show-current"), "main")
         self.save_settings(branch={"mode": "alwaysCreate"})
-        self.assertIn("created=true", self.start().stdout)
-        self.assertEqual(self.git("config", "branch.feat/test.agentWorkflowBase"), "main")
+        self.assertIn("created=true", self.prepare().stdout)
         self.save_settings(branch={"mode": "fromBase"})
-        self.assertIn("created=false", self.start().stdout)
+        self.assertIn("created=false", self.prepare().stdout)
 
     def test_sync_modes_and_update_methods(self):
         for mode, method in (("none", "ffOnly"), ("fetch", "ffOnly"),
@@ -244,7 +379,7 @@ class WorkflowTests(unittest.TestCase):
                 tree = self.git("rev-parse", "HEAD^{tree}")
                 remote_tip = self.git("--git-dir", str(self.remote), "commit-tree", tree, "-p", old, "-m", "Remote change")
                 self.git("--git-dir", str(self.remote), "update-ref", "refs/heads/main", remote_tip)
-                result = self.start()
+                result = self.prepare()
                 self.assertIn(f"sync={dict(none='skipped', fetch='fetched', update='updated')[mode]}", result.stdout)
                 self.assertEqual(self.git("rev-parse", "HEAD"), remote_tip if mode == "update" else old)
                 if mode != "none":
@@ -252,12 +387,12 @@ class WorkflowTests(unittest.TestCase):
                 self.git("fetch", "-q", "origin")
                 self.git("merge", "--ff-only", remote_tip)
 
-    def finish_local(self, method, cleanup):
+    def merge_local(self, method, cleanup):
         self.save_settings(integration={"mergeMethod": method}, branch={"deleteAfterIntegration": cleanup})
-        self.start()
+        self.prepare()
         self.change()
         self.commit()
-        result = self.run_cli("finish", "--message", "Deliver")
+        result = self.run_cli("merge", "--message", "Deliver")
         self.assertEqual(self.git("log", "-1", "--format=%s"), "Deliver")
         self.assertIn(f"method={method}", result.stdout)
         self.assertIn(f"deleted={'local-and-remote' if cleanup else 'false'}", result.stdout)
@@ -269,102 +404,226 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(bool(self.git("ls-remote", "--heads", "origin", "feat/test")), not cleanup)
         self.assertEqual(bool(self.git("branch", "--list", "feat/test")), not cleanup)
 
-    def test_finish_merge_commit(self):
-        self.finish_local("mergeCommit", False)
+    def test_merge_merge_commit(self):
+        self.merge_local("mergeCommit", False)
 
-    def test_finish_merge_cleanup(self):
-        self.finish_local("mergeCommit", True)
+    def test_merge_merge_cleanup(self):
+        self.merge_local("mergeCommit", True)
 
-    def test_finish_squash(self):
-        self.finish_local("squash", False)
+    def test_merge_squash(self):
+        self.merge_local("squash", False)
 
-    def test_finish_squash_cleanup(self):
-        self.finish_local("squash", True)
+    def test_merge_squash_cleanup(self):
+        self.merge_local("squash", True)
 
-    def test_finish_invalid_state(self):
+    def test_merge_invalid_state(self):
         self.save_settings(integration={"mergeMethod": "squash"})
-        self.start()
+        self.prepare()
         self.change()
-        self.assertIn("working tree must be clean", self.run_cli("finish", "--message", "Deliver", ok=False).stderr)
+        self.assertIn("working tree must be clean", self.run_cli("merge", "--message", "Deliver", ok=False).stderr)
         self.assertEqual(self.git("branch", "--show-current"), "feat/test")
 
     def test_pull_request_create_and_reuse(self):
         self.stub_gh()
         self.save_settings(integration={"mode": "pullRequest"})
-        self.start()
-        self.change()
-        self.commit()
-        self.assertIn("url=https://example.invalid/pr/1", self.run_cli("finish", "--title", "Task", "--body", "Details").stdout)
-        log = Path(self.env["GH_LOG"])
-        self.assertIn("pr create --base main --head feat/test --title Task --body Details", log.read_text())
-        self.stub_gh(existing=True)
-        log.write_text("")
-        self.run_cli("finish", "--title", "Task")
-        self.assertNotIn("pr create", log.read_text())
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        for subject in ("Commit A", "Commit B", "Commit C"):
+            (self.repo / "tracked").write_text(subject)
+            self.run_cli("prepare")
+            self.run_cli("commit", "--message", subject, "--", "tracked")
+        self.assertEqual(self.gh_calls(), [])
+        self.assertIn("url=https://example.invalid/pr/1", self.run_cli("pr", "submit").stdout)
+        state_path = Path(self.env["GH_STATE"])
+        state = json.loads(state_path.read_text())
+        self.assertEqual(state["title"], "feat/test")
+        self.assertEqual(state["body"], "## Summary\n\n- Commit A\n- Commit B\n- Commit C")
+        self.run_cli("pr", "submit")
+        self.change("other")
+        self.run_cli("commit", "--message", "Commit D", "--", "other")
+        self.run_cli("pr", "submit")
+        state = json.loads(state_path.read_text())
+        self.assertEqual(state["body"], "## Summary\n\n- Commit A\n- Commit B\n- Commit C\n- Commit D")
+        calls = self.gh_calls()
+        self.assertEqual(sum(call[:2] == ["pr", "create"] for call in calls), 1)
+        self.assertEqual(sum(call[:2] == ["pr", "edit"] for call in calls), 2)
+        self.assertFalse(any(call[:2] == ["pr", "merge"] for call in calls))
+        for call in calls:
+            if call[:2] == ["pr", "list"]:
+                self.assertEqual(call[2:6], ["--state", "open", "--head", "feat/test"])
         self.assertEqual(self.git("branch", "--show-current"), "feat/test")
-        self.assertEqual(self.git("config", "branch.feat/test.agentWorkflowCreated"), "true")
 
     def test_squash_default_single_commit_subject(self):
         self.save_settings(integration={"mergeMethod": "squash"})
-        self.start()
+        self.prepare()
         self.change()
         self.commit()
-        self.run_cli("finish")
+        self.run_cli("merge")
         self.assertEqual(self.git("log", "-1", "--format=%s"), "Change")
 
     def test_squash_default_multiple_commit_summary(self):
         self.save_settings(integration={"mergeMethod": "squash"})
-        self.run_cli("start", "--branch-name", "feat/ai-harness-preflight")
+        self.run_cli("prepare", "--branch-name", "feat/ai-harness-preflight")
         self.change()
         self.commit()
         self.change("other")
         self.commit("other")
-        self.run_cli("finish")
+        self.run_cli("merge")
         self.assertEqual(self.git("log", "-1", "--format=%s"), "feat(ai): harness preflight")
 
     def test_squash_default_unconventional_branch(self):
         self.save_settings(integration={"mergeMethod": "squash"})
-        self.run_cli("start", "--branch-name", "work-in-progress")
+        self.run_cli("prepare", "--branch-name", "work-in-progress")
         self.change()
         self.commit()
         self.change("other")
         self.commit("other")
-        self.run_cli("finish")
+        self.run_cli("merge")
         self.assertEqual(self.git("log", "-1", "--format=%s"), "work-in-progress")
 
     def test_merge_commit_keeps_git_default_message(self):
-        self.start()
+        self.prepare()
         self.change()
         self.commit()
-        self.run_cli("finish")
+        self.run_cli("merge")
         self.assertEqual(self.git("log", "-1", "--format=%s"), "Merge branch 'feat/test'")
 
     def test_pull_request_default_title(self):
         self.stub_gh()
         self.save_settings(integration={"mode": "pullRequest"})
-        self.run_cli("start", "--branch-name", "feat/ai-harness-preflight")
+        self.git("push", "-q", "origin", "main")
+        self.run_cli("prepare", "--branch-name", "feat/ai-harness-preflight")
         self.change()
         self.commit()
-        self.run_cli("finish")
-        log = Path(self.env["GH_LOG"])
-        self.assertIn("--title Change --body", log.read_text())
+        self.run_cli("pr", "submit")
+        state_path = Path(self.env["GH_STATE"])
+        self.assertEqual(json.loads(state_path.read_text())["title"], "Change")
         self.change("other")
         self.commit("other")
-        log.write_text("")
-        self.run_cli("finish")
-        self.assertIn("--title feat(ai): harness preflight --body", log.read_text())
+        self.run_cli("pr", "submit")
+        self.assertEqual(json.loads(state_path.read_text())["title"], "feat(ai): harness preflight")
 
-    def test_finish_rechecks_authentication(self):
+    def test_pr_rechecks_authentication(self):
         self.stub_gh()
         self.save_settings(integration={"mode": "pullRequest"})
-        self.start()
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
         (self.bin / "gh").write_text("#!/bin/sh\nexit 1\n")
         self.change()
         self.commit()
         self.run_cli("push")
-        self.assertIn("check=gh-auth", self.run_cli("finish", "--title", "Task", ok=False).stderr)
+        for action in ("submit", "merge"):
+            self.assertIn("check=gh-auth", self.run_cli("pr", action, ok=False).stderr)
         self.assertEqual(self.git("branch", "--show-current"), "feat/test")
-        self.assertEqual(self.git("config", "branch.feat/test.agentWorkflowCreated"), "true")
+
+    def test_delivery_mode_isolation(self):
+        self.prepare()
+        for action in ("submit", "merge"):
+            self.assertIn("localMerge mode", self.run_cli("pr", action, ok=False).stderr)
+        self.save_settings(integration={"mode": "pullRequest"})
+        self.git("push", "-q", "origin", "main")
+        self.assertIn("git-workflow pr merge", self.run_cli("merge", ok=False).stderr)
+
+    def test_pr_merge_missing_or_wrong_base(self):
+        self.stub_gh()
+        self.save_settings(integration={"mode": "pullRequest"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.assertIn("no open PR", self.run_cli("pr", "merge", ok=False).stderr)
+        self.assertFalse(any(call[:2] == ["pr", "create"] for call in self.gh_calls()))
+        self.change()
+        self.commit()
+        self.run_cli("pr", "submit")
+        state_path = Path(self.env["GH_STATE"])
+        state = json.loads(state_path.read_text())
+        state["base"] = "other"
+        state_path.write_text(json.dumps(state))
+        self.run_cli("pr", "merge", ok=False)
+        self.assertFalse(any(call[:2] == ["pr", "merge"] for call in self.gh_calls()))
+
+    def check_pr_merge(self, method, cleanup):
+        self.stub_gh()
+        self.save_settings(integration={"mode": "pullRequest", "mergeMethod": method},
+                           branch={"deleteAfterIntegration": cleanup})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.commit()
+        self.run_cli("pr", "submit")
+        result = self.run_cli("pr", "merge")
+        call = next(call for call in self.gh_calls() if call[:2] == ["pr", "merge"])
+        self.assertIn("--merge" if method == "mergeCommit" else "--squash", call)
+        self.assertNotIn("--auto", call)
+        self.assertEqual(self.git("branch", "--show-current"), "main")
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/main"))
+        self.assertEqual((self.repo / "tracked").read_text(), "changed\n")
+        self.assertIn(f"deleted={'local-and-remote' if cleanup else 'false'}", result.stdout)
+        self.assertEqual(bool(self.git("branch", "--list", "feat/test")), not cleanup)
+        self.assertEqual(bool(self.git("ls-remote", "--heads", "origin", "feat/test")), not cleanup)
+        self.assertEqual(self.git("config", "--get-regexp", "^branch.main.remote$"), "branch.main.remote origin")
+
+    def test_pr_merge_commit(self):
+        self.check_pr_merge("mergeCommit", False)
+
+    def test_pr_merge_commit_cleanup(self):
+        self.check_pr_merge("mergeCommit", True)
+
+    def test_pr_squash(self):
+        self.check_pr_merge("squash", False)
+
+    def test_pr_squash_cleanup(self):
+        self.check_pr_merge("squash", True)
+
+    def test_pr_failures_preserve_git_state(self):
+        self.stub_gh()
+        self.save_settings(integration={"mode": "pullRequest"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.run_cli("pr", "submit", ok=False)
+        self.assertEqual(self.gh_calls(), [])
+        self.commit()
+        self.env["GH_FAIL"] = "pr list"
+        self.run_cli("pr", "submit", ok=False)
+        self.assertFalse(any(call[:2] == ["pr", "create"] for call in self.gh_calls()))
+        del self.env["GH_FAIL"]
+        self.run_cli("pr", "submit")
+        self.env["GH_FAIL"] = "pr merge"
+        self.run_cli("pr", "merge", ok=False)
+        del self.env["GH_FAIL"]
+        self.env["GH_PENDING"] = "1"
+        self.run_cli("pr", "merge", ok=False)
+        self.assertEqual(self.git("branch", "--show-current"), "feat/test")
+
+    def test_pr_sync_failure_preserves_state_and_branches(self):
+        self.stub_gh()
+        self.save_settings(integration={"mode": "pullRequest"},
+                           branch={"deleteAfterIntegration": True})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.commit()
+        self.run_cli("pr", "submit")
+        local_base = self.git("commit-tree", "main^{tree}", "-p", "main", "-m", "Local base advance")
+        self.git("update-ref", "refs/heads/main", local_base)
+        self.run_cli("pr", "merge", ok=False)
+        self.assertEqual(json.loads(Path(self.env["GH_STATE"]).read_text())["state"], "MERGED")
+        self.assertEqual(self.git("rev-parse", "main"), local_base)
+        self.assertTrue(self.git("branch", "--list", "feat/test"))
+        self.assertTrue(self.git("ls-remote", "--heads", "origin", "feat/test"))
+
+    def test_pr_merge_rejects_merge_queue_before_mutation(self):
+        self.stub_gh()
+        self.save_settings(integration={"mode": "pullRequest"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.commit()
+        self.run_cli("pr", "submit")
+        for queue_value in ("true", "null"):
+            self.env["GH_MERGE_QUEUE"] = queue_value
+            self.run_cli("pr", "merge", ok=False)
+        self.assertFalse(any(call[:2] == ["pr", "merge"] for call in self.gh_calls()))
 
 
 if __name__ == "__main__":

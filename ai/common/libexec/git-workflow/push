@@ -27,7 +27,6 @@ parse_push_args() {
 push_changes() {
   CURRENT_ACTION="push"
   local branch
-  local base_branch
 
   parse_push_args "$@"
   preflight_core
@@ -55,8 +54,7 @@ push_changes() {
   esac
 
   branch="$(current_branch)"
-  base_branch="$(workflow_base_branch "$branch")"
-  push_branch "$branch" "$base_branch"
+  push_branch "$branch"
 
   printf '[git] push ok branch=%s\n' "$branch"
 }

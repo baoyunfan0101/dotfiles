@@ -13,7 +13,7 @@ sync_current_branch() {
       ;;
     fetch)
       remote="$(remote_for_branch "$branch")"
-      git fetch --quiet "$remote"
+      git fetch --quiet "$remote" || return $?
       SYNC_RESULT="fetched"
       ;;
     update)
@@ -24,17 +24,17 @@ sync_current_branch() {
         fail "current branch has no upstream: $branch"
       fi
 
-      git fetch --quiet "$remote"
+      git fetch --quiet "$remote" || return $?
 
       case "$SYNC_UPDATE_METHOD" in
         ffOnly)
-          git merge --quiet --ff-only "$upstream"
+          git merge --quiet --ff-only "$upstream" || return $?
           ;;
         rebase)
-          git rebase --quiet "$upstream"
+          git rebase --quiet "$upstream" || return $?
           ;;
         merge)
-          git merge --quiet --no-edit "$upstream"
+          git merge --quiet --no-edit "$upstream" || return $?
           ;;
         *)
           fail "unsupported git.sync.updateMethod: $SYNC_UPDATE_METHOD"

@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/delivery.sh"
+
+CURRENT_ACTION="pr"
+case "${1:-}" in
+  -h|--help) pr_usage; exit 0 ;;
+  submit|merge) PR_ACTION="$1"; shift ;;
+  "") pr_usage >&2; exit 1 ;;
+  *) fail "unknown pr command: $1" ;;
+esac
+CURRENT_ACTION="pr $PR_ACTION"
+parse_delivery_args "$@"
+
+initialize_delivery pullRequest
+
+resolve_delivery_base
+
+if [[ "$PR_ACTION" == submit ]]; then
+  push_branch "$working_branch" "$base_branch"
+  remote="$(remote_for_branch "$working_branch" "$base_branch")"
+  git fetch --quiet "$remote" "refs/heads/$base_branch:refs/remotes/$remote/$base_branch"
+  base_ref="refs/remotes/$remote/$base_branch"
+  [[ "$(git rev-list --count "$base_ref..$working_branch")" != 0 ]] || fail "working branch has no commits to submit"
+  PR_TITLE="$(branch_summary "$working_branch" "$base_ref")"
+  PR_BODY="$(printf '## Summary\n\n'; git log --reverse --format='- %s' "$base_ref..$working_branch")"
+  if [[ -z "$pr_url" ]]; then
+    pr_url="$(gh pr create --base "$base_branch" --head "$working_branch" --title "$PR_TITLE" --body "$PR_BODY")"
+  else
+    gh pr edit "$pr_url" --title "$PR_TITLE" --body "$PR_BODY" >/dev/null
+  fi
+  printf '[git] pr submit ok target=%s branch=%s url=%s\n' "$base_branch" "$working_branch" "$pr_url"
+else
+  queue_enabled="$(gh api graphql \
+    -f query='query($url: URI!) { resource(url: $url) { ... on PullRequest { isMergeQueueEnabled } } }' \
+    -f url="$pr_url" --jq '.data.resource.isMergeQueueEnabled')"
+  case "$queue_enabled" in
+    false) ;;
+    true) fail "merge queue requires deferred integration; automatic merging is not supported" ;;
+    *) fail "cannot verify merge queue policy" ;;
+  esac
+  case "$INTEGRATION_MERGE_METHOD" in
+    mergeCommit) merge_flag=--merge ;;
+    squash) merge_flag=--squash ;;
+    *) fail "unsupported git.integration.mergeMethod: $INTEGRATION_MERGE_METHOD" ;;
+  esac
+  gh pr merge "$pr_url" "$merge_flag" --match-head-commit "$(git rev-parse HEAD)"
+  [[ "$(gh pr view "$pr_url" --json state --jq '.state')" == MERGED ]] || fail "PR merge has not completed; local Git state was preserved"
+  remote="$(remote_for_branch "$working_branch" "$base_branch")"
+  git fetch --quiet "$remote" "refs/heads/$base_branch:refs/remotes/$remote/$base_branch"
+  git checkout -q "$base_branch"
+  if ! git merge --quiet --ff-only "refs/remotes/$remote/$base_branch"; then
+    git checkout -q "$working_branch"
+    fail "PR merged remotely but base sync failed; local commits and branches were preserved"
+  fi
+  if [[ "$DELETE_AFTER_INTEGRATION" == true ]]; then
+    delete_delivered_branch "$working_branch" "$base_branch"
+  fi
+  printf '[git] pr merge ok target=%s method=%s deleted=%s url=%s\n' \
+    "$base_branch" "$INTEGRATION_MERGE_METHOD" "$INTEGRATION_BRANCH_DELETED" "$pr_url"
+fi
