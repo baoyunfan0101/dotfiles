@@ -2,6 +2,19 @@
 set -Eeuo pipefail
 
 test_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+while IFS= read -r -d '' tracked_file; do
+  source_file="$test_root/$tracked_file"
+  [[ -f "$source_file" ]] || continue
+  IFS= read -r first_line < "$source_file" || true
+  if [[ "$first_line" == '#!'* && "$first_line" == *bash* ]]; then
+    bash -n "$source_file"
+  fi
+  if [[ "$tracked_file" == *.py || ( "$first_line" == '#!'* && "$first_line" == *python* ) ]]; then
+    python3 -B -c 'import ast, pathlib, sys; path = pathlib.Path(sys.argv[1]); ast.parse(path.read_bytes(), filename=str(path))' "$source_file"
+  fi
+done < <(git -C "$test_root" ls-files -z)
+
 test_sandbox="$(mktemp -d /tmp/dotfiles-test.XXXXXX)"
 trap 'rm -rf -- "$test_sandbox"' EXIT
 trap 'exit 130' INT

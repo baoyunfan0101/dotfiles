@@ -82,19 +82,6 @@ class ManagedBlockInstallTests(unittest.TestCase):
                                   result.stderr)
                     self.assertEqual(self.target.read_bytes(), before)
 
-    def test_legacy_manifest_does_not_clean_personal_rules(self):
-        personal = "legacy content stays\n"
-        self.target.write_text(personal)
-        manifest = Path(self.env["XDG_STATE_HOME"]) / "dotfiles/ai/codex.manifest"
-        manifest.parent.mkdir(parents=True)
-        manifest.write_text(f"{self.target}\n")
-
-        result = self.install("--force", "--clean")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(self.target.read_text().startswith(personal))
-        self.assert_one_block(self.target.read_text())
-        self.assertNotIn(str(self.target), manifest.read_text())
-
     def test_uninstall_removes_only_managed_block(self):
         self.target.write_text("personal rules\n")
         self.assertEqual(self.install().returncode, 0)

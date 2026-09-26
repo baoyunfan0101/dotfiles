@@ -62,7 +62,6 @@ parse_commit_args() {
 commit_changes() {
   CURRENT_ACTION="commit"
   local branch
-  local base_branch
   local commit_sha
 
   parse_commit_args "$@"
@@ -112,9 +111,7 @@ commit_changes() {
     return 0
   fi
 
-  base_branch="$(workflow_base_branch "$branch")"
-
-  if ! push_branch "$branch" "$base_branch"; then
+  if ! push_branch "$branch"; then
     fail "commit ${commit_sha:0:7} created but push failed"
   fi
 

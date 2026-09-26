@@ -16,29 +16,6 @@ current_branch() {
   printf '%s\n' "$branch"
 }
 
-workflow_base_branch() {
-  git config --get "branch.$1.agentWorkflowBase" || true
-}
-
-workflow_branch_created() {
-  git config --bool --get "branch.$1.agentWorkflowCreated" || printf 'false\n'
-}
-
-mark_workflow_branch() {
-  local branch="$1"
-  local base_branch="$2"
-
-  git config "branch.$branch.agentWorkflowBase" "$base_branch"
-  git config "branch.$branch.agentWorkflowCreated" true
-}
-
-clear_workflow_branch() {
-  local branch="$1"
-
-  git config --unset-all "branch.$branch.agentWorkflowBase" >/dev/null 2>&1 || true
-  git config --unset-all "branch.$branch.agentWorkflowCreated" >/dev/null 2>&1 || true
-}
-
 has_tracked_changes() {
   if ! git diff --quiet -- || ! git diff --cached --quiet --; then
     return 0
