@@ -4,7 +4,13 @@ usage() {
   cat <<EOF2
 Usage:
   git-workflow prepare [--branch-name NAME]
+  git-workflow prepare --base BRANCH --branch-name NAME
   git-workflow commit [--override-manual] --message MESSAGE (--all | -- PATH...)
+  git-workflow commit --amend [--message MESSAGE] (--all | -- PATH...)
+  git-workflow restore [--source REF] -- PATH...
+  git-workflow revert COMMIT
+  git-workflow cherry-pick COMMIT
+  git-workflow rebase [--base BRANCH]
   git-workflow push [--override-manual]
   git-workflow merge [--base BRANCH] [--message MESSAGE]
   git-workflow pr submit [--base BRANCH]
@@ -12,11 +18,24 @@ Usage:
 
 Commands:
   prepare
-      Prepare for repository-changing work before editing: protect changes,
-      synchronize, select the working branch, and restore protected changes.
+      Prepare the current branch before editing. With --base and --branch-name,
+      start a new branch from the updated configured base.
 
   commit
       Commit one atomic change after editing. Automatic mode also pushes it.
+      --amend rewrites the current working-branch HEAD with lease-safe publishing.
+
+  restore
+      Restore selected tracked paths in the working tree from HEAD or a ref.
+
+  revert
+      Create one inverse commit for a non-merge commit.
+
+  cherry-pick
+      Apply one non-merge commit to the current working branch.
+
+  rebase
+      Replay the current working branch onto the latest configured base.
 
   push
       Auxiliary operation for an explicitly needed push outside commit: push
@@ -34,11 +53,18 @@ Read-only tasks do not use workflow commands.
 
 Prepare options:
   --branch-name NAME
-      Candidate working branch name.
+      Candidate branch name when starting from a base.
+
+  --base BRANCH
+      Start a new working branch from this configured base. Requires
+      --branch-name; without --base, prepare continues the current branch.
 
 Commit options:
   --message MESSAGE
-      Commit message.
+      Commit message. Optional with --amend, which otherwise keeps the message.
+
+  --amend
+      Rewrite the current working-branch HEAD.
 
   --all
       Commit all current changes.
@@ -49,6 +75,17 @@ Commit options:
 
   -- PATH...
       Commit only the selected paths.
+
+Restore options:
+  --source REF
+      Read selected tracked paths from REF instead of HEAD.
+
+  -- PATH...
+      Required tracked paths; only the working tree is changed.
+
+Rebase options:
+  --base BRANCH
+      Use a configured base; required when multiple bases are configured.
 
 Push options:
   --override-manual

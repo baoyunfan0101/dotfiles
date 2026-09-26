@@ -258,20 +258,24 @@ class WorkflowTests(unittest.TestCase):
 
     def test_command_help_and_dispatch(self):
         help_text = self.run_cli("--help").stdout
-        self.assertEqual(set(re.findall(r"^  ([a-z]+)$", help_text, re.MULTILINE)),
-                         {"prepare", "commit", "merge", "push", "pr"})
+        self.assertEqual(set(re.findall(r"^  ([a-z][a-z-]*)$", help_text, re.MULTILINE)),
+                         {"prepare", "commit", "restore", "revert", "cherry-pick",
+                          "rebase", "merge", "push", "pr"})
         for meaning in ("before editing", "after editing", "--message MESSAGE",
                         "-- PATH...", "outside commit", "current branch",
                         "local", "pull request", "--branch-name NAME"):
             self.assertIn(meaning, help_text)
-        for action in ("prepare", "commit", "merge", "push"):
+        for action in ("prepare", "commit", "restore", "revert", "cherry-pick",
+                       "rebase", "merge", "push"):
             self.assertIn("Usage:", self.run_cli(action, "--help").stdout)
             self.assertIn(f"[git] {action} error", self.run_cli(action, "--invalid", ok=False).stderr)
         self.assertIn("configured base branch", self.run_cli("merge", ok=False).stderr)
         pr_help = self.run_cli("pr", "--help").stdout
         self.assertEqual(set(re.findall(r"^  ([a-z]+)$", pr_help, re.MULTILINE)), {"submit", "merge"})
-        for command in ("start", "finish"):
+        for command in ("start", "finish", "add", "stash", "pull", "checkout",
+                        "switch", "branch", "reset"):
             self.assertIn("unknown command", self.run_cli(command, ok=False).stderr)
+            self.assertNotIn(f"  git-workflow {command}\n", help_text)
         self.run_cli("pr", "unknown", ok=False)
         self.run_cli("pr", "submit", "--title", "No override", ok=False)
 
@@ -294,7 +298,8 @@ class WorkflowTests(unittest.TestCase):
             )
 
     def test_command_executables(self):
-        for action in ("prepare", "commit", "merge", "push", "pr"):
+        for action in ("prepare", "commit", "restore", "revert", "cherry-pick",
+                       "rebase", "merge", "push", "pr"):
             path = COMMON / "libexec/git-workflow" / action
             self.assertTrue(os.access(path, os.X_OK))
             self.assertEqual(path.read_text().splitlines()[0], "#!/usr/bin/env bash")
@@ -334,7 +339,8 @@ class WorkflowTests(unittest.TestCase):
         )
 
         installed = destination / ".local/bin/git-workflow"
-        for command in ("prepare", "commit", "push", "merge", "pr"):
+        for command in ("prepare", "commit", "restore", "revert", "cherry-pick",
+                        "rebase", "push", "merge", "pr"):
             self.assertTrue(os.access(destination / ".local/libexec/git-workflow" / command, os.X_OK))
         for command in ("start", "finish"):
             self.assertFalse((destination / ".local/libexec/git-workflow" / command).exists())
@@ -365,6 +371,111 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.git("diff", "--cached", "--name-only"), "other")
         self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/feat/test"))
 
+    def test_amend_selected_paths_and_message(self):
+        self.prepare()
+        (self.repo / "other").write_text("original other\n")
+        self.run_cli("commit", "--message", "Original", "--", "other")
+        old_head = self.git("rev-parse", "HEAD")
+        (self.repo / "tracked").write_text("amended tracked\n")
+        (self.repo / "other").write_text("unselected other\n")
+
+        result = self.run_cli("commit", "--amend", "--", "tracked")
+        self.assertIn("pushed=true", result.stdout)
+        self.assertNotEqual(self.git("rev-parse", "HEAD"), old_head)
+        self.assertEqual(self.git("log", "-1", "--format=%s"), "Original")
+        self.assertEqual(self.git("show", "HEAD:tracked"), "amended tracked")
+        self.assertEqual(self.git("show", "HEAD:other"), "original other")
+        self.assertEqual((self.repo / "other").read_text(), "unselected other\n")
+        self.assertEqual(self.git("diff", "--cached", "--name-only"), "")
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/feat/test"))
+
+    def test_amend_all_replaces_message_and_blocks_base(self):
+        before = self.git_snapshot()
+        self.assertIn("configured base branch",
+                      self.run_cli("commit", "--amend", "--all", ok=False).stderr)
+        self.assertEqual(self.git_snapshot(), before)
+        self.prepare()
+        self.change()
+        (self.repo / "other").write_text("new other\n")
+        self.commit()
+        old_head = self.git("rev-parse", "HEAD")
+        self.change("other")
+        self.run_cli("commit", "--amend", "--message", "Revised", "--all")
+        self.assertNotEqual(self.git("rev-parse", "HEAD"), old_head)
+        self.assertEqual(self.git("log", "-1", "--format=%s"), "Revised")
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_unpublished_amend_uses_normal_push(self):
+        self.prepare()
+        self.change()
+        self.git("add", "tracked")
+        self.git("commit", "-qm", "Unpublished")
+        (self.repo / "tracked").write_text("amended\n")
+        log = self.root / "push.log"
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            f'if [[ "$1" == push ]]; then printf "%s\\n" "$*" >> "{log}"; fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        git_stub.chmod(0o755)
+        self.run_cli("commit", "--amend", "--all")
+        self.assertNotIn("--force", log.read_text())
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/feat/test"))
+
+    def test_published_amend_uses_lease_and_rejects_race(self):
+        self.prepare()
+        self.change()
+        self.commit()
+        old_head = self.git("rev-parse", "HEAD")
+        self.change("other")
+        log = self.root / "push.log"
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            f'if [[ "$1" == push ]]; then printf "%s\\n" "$*" >> "{log}"; fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        git_stub.chmod(0o755)
+        self.run_cli("commit", "--amend", "--all")
+        self.assertNotEqual(self.git("rev-parse", "HEAD"), old_head)
+        self.assertIn("--force-with-lease=", log.read_text())
+        self.assertNotIn(" --force ", f" {log.read_text()} ")
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/feat/test"))
+
+        old_remote = self.git("rev-parse", "HEAD")
+        remote_advance = self.git("--git-dir", str(self.remote), "commit-tree",
+                                  f"{old_remote}^{{tree}}", "-p", old_remote,
+                                  "-m", "Concurrent remote update")
+        (self.repo / "tracked").write_text("second amendment\n")
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            'if [[ "$1" == push && "$*" == *--force-with-lease* ]]; then\n'
+                            f'  "{git_executable}" --git-dir "{self.remote}" update-ref refs/heads/feat/test {remote_advance}\n'
+                            'fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        result = self.run_cli("commit", "--amend", "--all", ok=False)
+        self.assertIn("lease-safe push failed", result.stderr)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test").split()[0],
+                         remote_advance)
+        self.assertEqual(self.git("branch", "--show-current"), "feat/test")
+
+    def test_failed_amend_restores_original_index(self):
+        self.prepare()
+        self.change()
+        self.commit()
+        original_head = self.git("rev-parse", "HEAD")
+        (self.repo / "staged").write_text("preexisting staged\n")
+        self.git("add", "staged")
+        (self.repo / "tracked").write_text("candidate amendment\n")
+        original_status = self.git("status", "--porcelain")
+        hook = self.repo / ".git/hooks/pre-commit"
+        hook.write_text("#!/bin/sh\nexit 1\n")
+        hook.chmod(0o755)
+
+        result = self.run_cli("commit", "--amend", "--all", ok=False)
+        self.assertIn("original index was restored", result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
+        self.assertEqual(self.git("status", "--porcelain"), original_status)
+        self.assertEqual(self.git("rev-parse", "origin/feat/test"), original_head)
+
     def test_all_and_invalid_commit(self):
         self.prepare()
         self.change()
@@ -388,6 +499,175 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("skip reason=manual", self.run_cli("push").stdout)
         self.run_cli("push", "--override-manual")
         self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/feat/test"))
+
+    def test_restore_only_selected_tracked_worktree_paths(self):
+        self.prepare()
+        (self.repo / "other").write_text("other original\n")
+        self.run_cli("commit", "--message", "Add other", "--", "other")
+        original_head = self.git("rev-parse", "HEAD")
+        remote_head = self.git("ls-remote", "--heads", "origin", "feat/test")
+        self.change()
+        (self.repo / "other").write_text("other modified\n")
+        (self.repo / "untracked").write_text("keep me\n")
+        self.run_cli("restore", "--", "tracked")
+        self.assertEqual((self.repo / "tracked").read_text(), "original\n")
+        self.assertEqual((self.repo / "other").read_text(), "other modified\n")
+        self.assertEqual((self.repo / "untracked").read_text(), "keep me\n")
+        self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test"), remote_head)
+        self.assertEqual(self.git("diff", "--cached", "--name-only"), "")
+        self.assertIn("unknown restore option", self.run_cli("restore", "--staged", "--", "tracked", ok=False).stderr)
+        self.assertIn("path is not tracked", self.run_cli("restore", "--", "untracked", ok=False).stderr)
+
+    def test_restore_explicit_source(self):
+        self.prepare()
+        self.change()
+        self.commit()
+        original_head = self.git("rev-parse", "HEAD")
+        self.run_cli("restore", "--source", "HEAD~1", "--", "tracked")
+        self.assertEqual((self.repo / "tracked").read_text(), "original\n")
+        self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
+
+    def test_restore_rejects_missing_source_path_before_changes(self):
+        self.prepare()
+        (self.repo / "later").write_text("later content\n")
+        self.run_cli("commit", "--message", "Add later", "--", "later")
+        self.change()
+        before = self.git_snapshot()
+        result = self.run_cli("restore", "--source", "HEAD~1", "--", "later", "tracked", ok=False)
+        self.assertIn("path is absent from source", result.stderr)
+        self.assertEqual(self.git_snapshot(), before)
+
+    def test_revert_creates_inverse_commit_and_rejects_merge_commit(self):
+        self.prepare()
+        self.change()
+        self.commit()
+        target = self.git("rev-parse", "HEAD")
+        result = self.run_cli("revert", target)
+        self.assertIn("pushed=true", result.stdout)
+        self.assertEqual((self.repo / "tracked").read_text(), "original\n")
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/feat/test"))
+        self.assertTrue(self.git("merge-base", "--is-ancestor", target, "HEAD") == "")
+        merge_sha = self.git("commit-tree", "HEAD^{tree}", "-p", "HEAD", "-p", "main",
+                             "-m", "Synthetic merge")
+        self.git("update-ref", "refs/heads/feat/test", merge_sha)
+        self.assertIn("merge commits is not supported",
+                      self.run_cli("revert", merge_sha, ok=False).stderr)
+
+    def test_revert_conflict_aborts_without_changing_history(self):
+        self.prepare()
+        (self.repo / "tracked").write_text("first\n")
+        self.commit()
+        first = self.git("rev-parse", "HEAD")
+        (self.repo / "tracked").write_text("second\n")
+        self.commit()
+        original_head = self.git("rev-parse", "HEAD")
+        remote_head = self.git("ls-remote", "--heads", "origin", "feat/test")
+        result = self.run_cli("revert", first, ok=False)
+        self.assertIn("original branch and HEAD were restored", result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test"), remote_head)
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assert_no_in_progress_git_operation()
+
+    def test_cherry_pick_applies_one_commit_and_aborts_conflict(self):
+        self.prepare()
+        (self.repo / "feature").write_text("feature content\n")
+        self.run_cli("commit", "--message", "Feature", "--", "feature")
+        self.git("branch", "source", "main")
+        self.git("switch", "source")
+        (self.repo / "picked").write_text("picked content\n")
+        self.git("add", "picked")
+        self.git("commit", "-qm", "Source change")
+        source_sha = self.git("rev-parse", "HEAD")
+        self.git("switch", "feat/test")
+        result = self.run_cli("cherry-pick", source_sha)
+        self.assertIn("pushed=true", result.stdout)
+        self.assertEqual((self.repo / "picked").read_text(), "picked content\n")
+        self.assertNotEqual(self.git("rev-parse", "HEAD"), source_sha)
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/feat/test"))
+
+        self.git("switch", "source")
+        (self.repo / "tracked").write_text("source conflict\n")
+        self.git("add", "tracked")
+        self.git("commit", "-qm", "Conflicting source")
+        conflicting_sha = self.git("rev-parse", "HEAD")
+        self.git("switch", "feat/test")
+        (self.repo / "tracked").write_text("working conflict\n")
+        self.commit()
+        original_head = self.git("rev-parse", "HEAD")
+        result = self.run_cli("cherry-pick", conflicting_sha, ok=False)
+        self.assertIn("original branch and HEAD were restored", result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assert_no_in_progress_git_operation()
+
+    def test_rebase_uses_latest_remote_base_and_lease(self):
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        (self.repo / "feature").write_text("feature content\n")
+        self.run_cli("commit", "--message", "Feature", "--", "feature")
+        original_head = self.git("rev-parse", "HEAD")
+        upstream = Path(tempfile.mkdtemp(dir=self.root))
+        subprocess.check_call(["git", "clone", "-q", "-b", "main", str(self.remote), str(upstream)],
+                              env=self.env)
+        (upstream / "base-note").write_text("new base\n")
+        for arguments in (("add", "base-note"), ("commit", "-qm", "Advance base"),
+                          ("push", "-q", "origin", "main")):
+            subprocess.check_call(["git", "-C", str(upstream), *arguments], env=self.env)
+        remote_base = self.git("ls-remote", "--heads", "origin", "main").split()[0]
+        log = self.root / "push.log"
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            f'if [[ "$1" == push ]]; then printf "%s\\n" "$*" >> "{log}"; fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        git_stub.chmod(0o755)
+
+        result = self.run_cli("rebase")
+        self.assertIn("base=main", result.stdout)
+        self.assertNotEqual(self.git("rev-parse", "HEAD"), original_head)
+        self.assertEqual(self.git("merge-base", "HEAD", remote_base), remote_base)
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/feat/test"))
+        self.assertIn("--force-with-lease=", log.read_text())
+        self.assertNotIn(" --force ", f" {log.read_text()} ")
+        self.assertEqual(self.git("rev-parse", "main"), self.git("merge-base", "main", remote_base))
+        self.assert_no_in_progress_git_operation()
+
+    def test_rebase_base_validation_and_ambiguity(self):
+        self.save_settings(branch={"baseBranches": ["main", "develop"]})
+        self.git("branch", "develop")
+        self.git("push", "-q", "origin", "main", "develop")
+        self.prepare()
+        before = self.git_snapshot()
+        self.assertIn("ambiguous base", self.run_cli("rebase", ok=False).stderr)
+        self.assertIn("base is not configured",
+                      self.run_cli("rebase", "--base", "outside", ok=False).stderr)
+        self.assertEqual(self.git_snapshot(), before)
+        self.assertIn("base=develop", self.run_cli("rebase", "--base", "develop").stdout)
+
+    def test_rebase_conflict_restores_original_state(self):
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        (self.repo / "tracked").write_text("feature conflict\n")
+        self.commit()
+        original_head = self.git("rev-parse", "HEAD")
+        remote_feature = self.git("ls-remote", "--heads", "origin", "feat/test")
+        upstream = Path(tempfile.mkdtemp(dir=self.root))
+        subprocess.check_call(["git", "clone", "-q", "-b", "main", str(self.remote), str(upstream)],
+                              env=self.env)
+        (upstream / "tracked").write_text("base conflict\n")
+        for arguments in (("add", "tracked"), ("commit", "-qm", "Conflicting base"),
+                          ("push", "-q", "origin", "main")):
+            subprocess.check_call(["git", "-C", str(upstream), *arguments], env=self.env)
+
+        result = self.run_cli("rebase", ok=False)
+        self.assertIn("original branch and HEAD were restored", result.stderr)
+        self.assertEqual(self.git("branch", "--show-current"), "feat/test")
+        self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test"), remote_feature)
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assert_no_in_progress_git_operation()
 
     def test_prepare_backup_modes_and_methods(self):
         for method in ("stash", "commit"):
@@ -417,6 +697,99 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("created=true", self.prepare().stdout)
         self.save_settings(branch={"mode": "fromBase"})
         self.assertIn("created=false", self.prepare().stdout)
+
+    def test_prepare_explicit_base_starts_from_latest_base(self):
+        self.save_settings(sync={"mode": "update", "updateMethod": "ffOnly"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.commit()
+        old_branch_head = self.git("rev-parse", "HEAD")
+        old_main = self.git("rev-parse", "main")
+        remote_tip = self.git("--git-dir", str(self.remote), "commit-tree", "main^{tree}",
+                              "-p", old_main, "-m", "Remote base advance")
+        self.git("--git-dir", str(self.remote), "update-ref", "refs/heads/main", remote_tip)
+        (self.repo / "user-note").write_text("protected\n")
+
+        result = self.run_cli("prepare", "--base", "main", "--branch-name", "feat/next")
+        self.assertIn("branch=feat/next created=true", result.stdout)
+        self.assertEqual(self.git("branch", "--show-current"), "feat/next")
+        self.assertEqual(self.git("rev-parse", "HEAD"), remote_tip)
+        self.assertEqual(self.git("rev-parse", "main"), remote_tip)
+        self.assertEqual(self.git("rev-parse", "feat/test"), old_branch_head)
+        self.assertEqual((self.repo / "user-note").read_text(), "protected\n")
+        self.assertIn("user-note", self.git("status", "--porcelain"))
+
+    def test_prepare_explicit_base_validates_before_mutation(self):
+        self.prepare()
+        for arguments, message in (
+            (("--base", "outside", "--branch-name", "feat/next"), "base is not configured"),
+            (("--base", "main"), "--base requires --branch-name"),
+            (("--base", "main", "--branch-name", "feat/test"), "branch already exists"),
+        ):
+            with self.subTest(arguments=arguments):
+                before = self.git_snapshot()
+                self.assertIn(message, self.run_cli("prepare", *arguments, ok=False).stderr)
+                self.assertEqual(self.git_snapshot(), before)
+
+    def test_prepare_explicit_base_sync_conflict_restores_original_branch(self):
+        self.save_settings(sync={"mode": "update", "updateMethod": "merge"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        working_head = self.git("rev-parse", "HEAD")
+        self.git("switch", "main")
+        base_head, remote_head = self.diverge_main_with_conflict()
+        self.git("switch", "feat/test")
+        (self.repo / "user-note").write_text("protected\n")
+
+        result = self.run_cli("prepare", "--base", "main", "--branch-name", "feat/next", ok=False)
+        self.assertIn("base sync failed", result.stderr)
+        self.assertEqual(self.git("branch", "--show-current"), "feat/test")
+        self.assertEqual(self.git("rev-parse", "HEAD"), working_head)
+        self.assertEqual(self.git("rev-parse", "main"), base_head)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "main"), remote_head)
+        self.assertEqual((self.repo / "user-note").read_text(), "protected\n")
+        self.assertEqual(self.git("branch", "--list", "feat/next"), "")
+        self.assert_no_in_progress_git_operation()
+
+    def test_prepare_explicit_base_retains_backup_on_restore_failure(self):
+        self.save_settings(sync={"mode": "none"})
+        self.prepare()
+        (self.repo / "user-note").write_text("protected\n")
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            'if [[ "$1" == stash && "$2" == apply ]]; then exit 1; fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        git_stub.chmod(0o755)
+        original_head = self.git("rev-parse", "HEAD")
+
+        result = self.run_cli("prepare", "--base", "main", "--branch-name", "feat/next", ok=False)
+        self.assertIn("backup retained", result.stderr)
+        self.assertEqual(self.git("branch", "--show-current"), "feat/test")
+        self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
+        self.assertEqual(self.git("branch", "--list", "feat/next"), "")
+        self.assertTrue(self.git("stash", "list"))
+
+    def test_prepare_explicit_base_branch_creation_failure_restores_changes(self):
+        self.save_settings(sync={"mode": "none"})
+        self.prepare()
+        original_head = self.git("rev-parse", "HEAD")
+        (self.repo / "user-note").write_text("protected\n")
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            'if [[ "$1" == checkout && "$2" == -q && "$3" == -b ]]; then exit 1; fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        git_stub.chmod(0o755)
+
+        result = self.run_cli("prepare", "--base", "main", "--branch-name", "feat/next", ok=False)
+        self.assertIn("branch creation failed", result.stderr)
+        self.assertEqual(self.git("branch", "--show-current"), "feat/test")
+        self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
+        self.assertEqual((self.repo / "user-note").read_text(), "protected\n")
+        self.assertEqual(self.git("branch", "--list", "feat/next"), "")
+        self.assert_no_in_progress_git_operation()
 
     def test_sync_modes_and_update_methods(self):
         for mode, method in (("none", "ffOnly"), ("fetch", "ffOnly"),

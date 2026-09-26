@@ -18,15 +18,17 @@
 
 ## Workflow
 
-Use `git-workflow` for repository-changing tasks. Do not run workflow commands for read-only tasks or reproduce their Git operations manually.
+Read-only Git commands may run directly. Do not directly run Git commands that modify the working tree, index, history, branches, or remote state. Use `git-workflow` for supported mutations; if an operation is unsupported, stop and report the workflow capability gap instead of bypassing it with raw Git.
 
-Development: prepare -> edit -> commit*. Delivery requires explicit user authorization. Use `git-workflow --help` for syntax and options.
+Development: prepare -> edit -> commit*. Delivery requires explicit user authorization. Use `git-workflow --help` for syntax and options. Supported mutations: `prepare`, `commit`, `commit --amend`, `restore`, `revert`, `cherry-pick`, `rebase`, `push`, `merge`, `pr submit`, and `pr merge`.
 
-Run before each repository-changing work session:
+To continue work on the current branch, run before editing:
 
 ```bash
-git-workflow prepare --branch-name <candidate-branch>
+git-workflow prepare
 ```
+
+To explicitly start a new branch from the latest configured base, run `git-workflow prepare --base <base> --branch-name <name>`.
 
 If `prepare` reports `workflow-disabled`, do not use further workflow commands for that work.
 

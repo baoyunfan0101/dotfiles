@@ -3,8 +3,11 @@ set -Eeuo pipefail
 
 WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/mutation.sh"
 
 COMMIT_MESSAGE=""
+COMMIT_MESSAGE_GIVEN=false
+COMMIT_AMEND=false
 COMMIT_ALL=false
 COMMIT_OVERRIDE_MANUAL=false
 COMMIT_PATHS=()
@@ -16,10 +19,16 @@ parse_commit_args() {
       --message)
         [[ $# -ge 2 ]] || fail "missing value for --message"
         COMMIT_MESSAGE="$2"
+        COMMIT_MESSAGE_GIVEN=true
         shift 2
         ;;
       --message=*)
         COMMIT_MESSAGE="${1#*=}"
+        COMMIT_MESSAGE_GIVEN=true
+        shift
+        ;;
+      --amend)
+        COMMIT_AMEND=true
         shift
         ;;
       --all)
@@ -48,7 +57,9 @@ parse_commit_args() {
     esac
   done
 
-  [[ -n "$COMMIT_MESSAGE" ]] || fail "--message is required"
+  if [[ "$COMMIT_AMEND" != true || "$COMMIT_MESSAGE_GIVEN" == true ]]; then
+    [[ -n "$COMMIT_MESSAGE" ]] || fail "--message is required"
+  fi
 
   if [[ "$COMMIT_ALL" == true && "$COMMIT_PATH_COUNT" -gt 0 ]]; then
     fail "--all cannot be combined with explicit paths"
@@ -63,6 +74,12 @@ commit_changes() {
   CURRENT_ACTION="commit"
   local branch
   local commit_sha
+  local original_head
+  local remote
+  local remote_sha
+  local pushed=false
+  local message_args=()
+  local original_index_tree
 
   parse_commit_args "$@"
   preflight_core
@@ -89,33 +106,73 @@ commit_changes() {
       ;;
   esac
 
-  if [[ "$COMMIT_ALL" == true ]]; then
-    git add -A
-    git diff --cached --quiet && fail "no changes to commit"
-    git commit --quiet -m "$COMMIT_MESSAGE"
-  else
-    git add -A -- "${COMMIT_PATHS[@]}"
+  branch="$(current_branch)"
+  if [[ "$COMMIT_AMEND" == true ]]; then
+    require_working_branch "$branch"
+    original_head="$(git rev-parse HEAD)"
+    original_index_tree="$(git write-tree)" || fail "cannot record index before amend"
+    remote="$(remote_for_branch "$branch")"
+    remote_sha="$(remote_branch_sha "$remote" "$branch")"
+    verify_remote_ancestor "$remote_sha" "$original_head"
+    if [[ "$COMMIT_MESSAGE_GIVEN" == true ]]; then
+      message_args=(-m "$COMMIT_MESSAGE")
+    else
+      message_args=(--no-edit)
+    fi
+  fi
 
-    if git diff --quiet HEAD -- "${COMMIT_PATHS[@]}"; then
+  if [[ "$COMMIT_ALL" == true ]]; then
+    if [[ "$COMMIT_AMEND" == true ]]; then
+      git add -A || restore_failed_amend_index "$original_index_tree"
+    else
+      git add -A
+    fi
+    if [[ "$COMMIT_AMEND" == true ]]; then
+      git commit --quiet --amend "${message_args[@]}" || restore_failed_amend_index "$original_index_tree"
+    else
+      git diff --cached --quiet && fail "no changes to commit"
+      git commit --quiet -m "$COMMIT_MESSAGE"
+    fi
+  else
+    if [[ "$COMMIT_AMEND" == true ]]; then
+      git add -A -- "${COMMIT_PATHS[@]}" || restore_failed_amend_index "$original_index_tree"
+    else
+      git add -A -- "${COMMIT_PATHS[@]}"
+    fi
+
+    if [[ "$COMMIT_AMEND" != true ]] && git diff --quiet HEAD -- "${COMMIT_PATHS[@]}"; then
       fail "selected paths have no changes to commit"
     fi
 
-    git commit --quiet -m "$COMMIT_MESSAGE" -- "${COMMIT_PATHS[@]}"
+    if [[ "$COMMIT_AMEND" == true ]]; then
+      git commit --quiet --amend --only "${message_args[@]}" -- "${COMMIT_PATHS[@]}" || restore_failed_amend_index "$original_index_tree"
+    else
+      git commit --quiet -m "$COMMIT_MESSAGE" -- "${COMMIT_PATHS[@]}"
+    fi
   fi
 
   commit_sha="$(git rev-parse HEAD)"
-  branch="$(current_branch)"
+  if [[ "$COMMIT_AMEND" == true && "$commit_sha" == "$original_head" ]]; then
+    fail "amend did not change HEAD"
+  fi
 
   if [[ "$COMMIT_MODE" == "manual" ]]; then
     printf '[git] commit ok sha=%s branch=%s pushed=false\n' "${commit_sha:0:7}" "$branch"
     return 0
   fi
 
-  if ! push_branch "$branch"; then
+  if [[ "$COMMIT_AMEND" == true ]]; then
+    if ! publish_rewrite "$branch" "$remote" "$remote_sha"; then
+      fail "amend ${commit_sha:0:7} created but lease-safe push failed"
+    fi
+    pushed=true
+  elif ! push_branch "$branch"; then
     fail "commit ${commit_sha:0:7} created but push failed"
+  else
+    pushed=true
   fi
 
-  printf '[git] commit ok sha=%s branch=%s pushed=true\n' "${commit_sha:0:7}" "$branch"
+  printf '[git] commit ok sha=%s branch=%s pushed=%s\n' "${commit_sha:0:7}" "$branch" "$pushed"
 }
 
 commit_changes "$@"

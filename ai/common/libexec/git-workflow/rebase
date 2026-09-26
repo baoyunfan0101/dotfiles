@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/mutation.sh"
+
+CURRENT_ACTION="rebase"
+requested_base=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --base)
+      [[ $# -ge 2 && -n "$2" ]] || fail "missing value for --base"
+      requested_base="$2"
+      shift 2
+      ;;
+    --base=*)
+      requested_base="${1#*=}"
+      [[ -n "$requested_base" ]] || fail "missing value for --base"
+      shift
+      ;;
+    -h|--help) usage; exit 0 ;;
+    *) fail "unknown rebase option: $1" ;;
+  esac
+done
+
+preflight_core
+require_repository
+if ! project_workflow_enabled; then
+  printf '[git] rebase skip reason=workflow-disabled\n'
+  exit 0
+fi
+
+branch="$(current_branch)"
+require_working_branch "$branch"
+require_clean_worktree
+load_commit_settings
+base="$(resolve_configured_base "$requested_base")"
+remote="$(remote_for_branch "$branch" "$base")"
+original_head="$(git rev-parse HEAD)"
+previous_remote_sha="$(remote_branch_sha "$remote" "$branch")"
+verify_remote_ancestor "$previous_remote_sha" "$original_head"
+git fetch --quiet "$remote" "refs/heads/$base:refs/remotes/$remote/$base" || fail "cannot fetch base: $base"
+base_ref="refs/remotes/$remote/$base"
+git rev-parse --verify "$base_ref^{commit}" >/dev/null || fail "base is not resolvable: $base"
+
+if ! git rebase --quiet "$base_ref"; then
+  restore_failed_sequence rebase "$branch" "$original_head"
+fi
+new_head="$(git rev-parse HEAD)"
+if [[ "$COMMIT_MODE" == automatic && "$new_head" != "$original_head" ]]; then
+  publish_rewrite "$branch" "$remote" "$previous_remote_sha" || fail "rebase completed locally but lease-safe push failed"
+  pushed=true
+else
+  pushed=false
+fi
+printf '[git] rebase ok base=%s sha=%s branch=%s pushed=%s\n' \
+  "$base" "${new_head:0:7}" "$branch" "$pushed"

@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/mutation.sh"
+
+CURRENT_ACTION="revert"
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+esac
+[[ $# -eq 1 && "$1" != -* ]] || fail "usage: git-workflow revert COMMIT"
+target="$1"
+preflight_core
+require_repository
+if ! project_workflow_enabled; then
+  printf '[git] revert skip reason=workflow-disabled\n'
+  exit 0
+fi
+
+branch="$(current_branch)"
+require_working_branch "$branch"
+require_clean_worktree
+load_commit_settings
+target_sha="$(git rev-parse --verify "$target^{commit}")" || fail "commit not found: $target"
+[[ "$(git rev-list --parents -n 1 "$target_sha" | wc -w | tr -d ' ')" -le 2 ]] || fail "reverting merge commits is not supported"
+original_head="$(git rev-parse HEAD)"
+if ! git revert --no-edit "$target_sha"; then
+  restore_failed_sequence revert "$branch" "$original_head"
+fi
+new_head="$(git rev-parse HEAD)"
+if [[ "$COMMIT_MODE" == automatic ]]; then
+  push_branch "$branch" || fail "revert commit created but push failed"
+  pushed=true
+else
+  pushed=false
+fi
+printf '[git] revert ok sha=%s branch=%s pushed=%s\n' "${new_head:0:7}" "$branch" "$pushed"
