@@ -4,6 +4,7 @@ set -Eeuo pipefail
 WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
 source "$WORKFLOW_ROOT/lib/git-workflow/delivery.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/sync.sh"
 
 CURRENT_ACTION="merge"
 parse_delivery_args "$@"

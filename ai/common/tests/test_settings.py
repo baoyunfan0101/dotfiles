@@ -234,6 +234,21 @@ class SettingsTests(unittest.TestCase):
                 model["get_value"](settings, path)
         self.assertEqual(settings["schemaVersion"], model["SCHEMA_VERSION"])
 
+    def test_generated_defaults_match_project_contract(self):
+        model = runpy.run_path(str(PROJECT))
+        self.assertEqual(model["DEFAULT_SETTINGS"], {
+            "schemaVersion": 1,
+            "workflow": {"enabled": False},
+            "git": {
+                "sync": {"mode": "update", "updateMethod": "ffOnly"},
+                "backup": {"mode": "all", "method": "stash"},
+                "commit": {"mode": "automatic"},
+                "branch": {"mode": "fromBase", "baseBranches": ["main"],
+                           "deleteAfterIntegration": False},
+                "integration": {"mode": "localMerge", "mergeMethod": "mergeCommit"},
+            },
+        })
+
     def test_existing_project_ignores_changed_global_defaults(self):
         self.write_config({"workflow": {"enabled": True}})
         stored = json.loads(self.config.read_text())

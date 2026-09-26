@@ -416,6 +416,37 @@ class WorkflowTests(unittest.TestCase):
     def test_merge_squash_cleanup(self):
         self.merge_local("squash", True)
 
+    def test_local_integration_conflicts_restore_both_branches(self):
+        for method in ("mergeCommit", "squash"):
+            with self.subTest(method=method):
+                self.save_settings(integration={"mergeMethod": method})
+                self.git("push", "-q", "origin", "main")
+                branch_name = f"feat/test-{method}"
+                self.run_cli("prepare", "--branch-name", branch_name)
+                self.change()
+                self.commit()
+                working_head = self.git("rev-parse", "HEAD")
+                self.git("switch", "main")
+                (self.repo / "tracked").write_text("base change\n")
+                self.git("add", "tracked")
+                self.git("commit", "-qm", "Conflicting base change")
+                base_head = self.git("rev-parse", "HEAD")
+                remote_base = self.git("ls-remote", "--heads", "origin", "main")
+                self.git("switch", branch_name)
+
+                result = self.run_cli("merge", ok=False)
+                self.assertIn("local integration failed", result.stderr)
+                self.assertEqual(self.git("branch", "--show-current"), branch_name)
+                self.assertEqual(self.git("rev-parse", "HEAD"), working_head)
+                self.assertEqual(self.git("rev-parse", "main"), base_head)
+                self.assertEqual(self.git("status", "--porcelain"), "")
+                self.assertEqual(self.git("ls-files", "--unmerged"), "")
+                self.assertEqual(self.git("ls-remote", "--heads", "origin", "main"), remote_base)
+                self.assertEqual(self.git("branch", "--list", branch_name), f"* {branch_name}")
+                self.git("switch", "main")
+                self.git("reset", "--hard", "-q", "origin/main")
+                self.git("branch", "-D", branch_name)
+
     def test_merge_invalid_state(self):
         self.save_settings(integration={"mergeMethod": "squash"})
         self.prepare()
@@ -452,6 +483,28 @@ class WorkflowTests(unittest.TestCase):
             if call[:2] == ["pr", "list"]:
                 self.assertEqual(call[2:6], ["--state", "open", "--head", "feat/test"])
         self.assertEqual(self.git("branch", "--show-current"), "feat/test")
+
+    def test_pr_submit_without_new_commits_does_not_push(self):
+        self.stub_gh()
+        self.save_settings(integration={"mode": "pullRequest"})
+        self.git("push", "-q", "origin", "main")
+        self.git("switch", "-c", "fix/no-new-commits")
+        remote_before = self.git("ls-remote", "--heads", "origin")
+
+        result = self.run_cli("pr", "submit", ok=False)
+        self.assertIn("no commits to submit", result.stderr)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin"), remote_before)
+        self.assertFalse(any(call[:2] in (["pr", "create"], ["pr", "edit"])
+                             for call in self.gh_calls()))
+
+    def test_commit_and_push_do_not_load_prepare_modules(self):
+        runtime = (COMMON / "lib/git-workflow/runtime.sh").read_text()
+        for module in ("backup.sh", "sync.sh", "branch.sh"):
+            self.assertNotIn(f'source "$WORKFLOW_ROOT/lib/git-workflow/{module}"', runtime)
+        self.prepare()
+        self.change()
+        self.commit()
+        self.run_cli("push")
 
     def test_squash_default_single_commit_subject(self):
         self.save_settings(integration={"mergeMethod": "squash"})

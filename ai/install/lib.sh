@@ -481,9 +481,6 @@ clean_module() {
 
   for target in ${MANAGED_TARGETS[@]+"${MANAGED_TARGETS[@]}"}; do
     if ! array_contains "$target" ${MODULE_TARGETS[@]+"${MODULE_TARGETS[@]}"}; then
-      if array_contains "$target" ${MODULE_BLOCK_TARGETS[@]+"${MODULE_BLOCK_TARGETS[@]}"}; then
-        continue
-      fi
       remove_target "$target"
       echo "Removed stale target: $target"
     fi
@@ -532,9 +529,6 @@ uninstall_module() {
   done
 
   for target in ${MANAGED_TARGETS[@]+"${MANAGED_TARGETS[@]}"}; do
-    if array_contains "$target" ${MODULE_BLOCK_TARGETS[@]+"${MODULE_BLOCK_TARGETS[@]}"}; then
-      continue
-    fi
     remove_target "$target"
     echo "Removed: $target"
   done

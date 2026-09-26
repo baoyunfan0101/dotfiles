@@ -11,96 +11,59 @@ from pathlib import Path
 
 SCHEMA_VERSION = 1
 
-DEFAULT_SETTINGS = {
-    "schemaVersion": SCHEMA_VERSION,
-    "workflow": {
-        "enabled": False,
-    },
-    "git": {
-        "sync": {
-            "mode": "update",
-            "updateMethod": "ffOnly",
-        },
-        "backup": {
-            "mode": "all",
-            "method": "stash",
-        },
-        "commit": {
-            "mode": "automatic",
-        },
-        "branch": {
-            "mode": "fromBase",
-            "baseBranches": ["main"],
-            "deleteAfterIntegration": False,
-        },
-        "integration": {
-            "mode": "localMerge",
-            "mergeMethod": "mergeCommit",
-        },
-    },
+SETTING_SPECS = {
+    "schemaVersion": {"type": int, "default": SCHEMA_VERSION,
+                      "description": "Project settings schema version.", "configurable": False},
+    "workflow.enabled": {"type": bool, "default": False,
+                         "description": "Whether this repository uses git-workflow."},
+    "git.sync.mode": {"type": str, "default": "update",
+                      "values": {"none", "fetch", "update"},
+                      "description": "Synchronization performed before workflow operations."},
+    "git.sync.updateMethod": {"type": str, "default": "ffOnly",
+                              "values": {"ffOnly", "rebase", "merge"},
+                              "description": "How an upstream update is applied."},
+    "git.backup.mode": {"type": str, "default": "all",
+                        "values": {"none", "tracked", "untracked", "all"},
+                        "description": "Local changes protected during repository preparation."},
+    "git.backup.method": {"type": str, "default": "stash",
+                          "values": {"stash", "commit"},
+                          "description": "How selected local changes are protected."},
+    "git.commit.mode": {"type": str, "default": "automatic",
+                        "values": {"manual", "automatic"},
+                        "description": "Whether workflow commits and pushes are automatic."},
+    "git.branch.mode": {"type": str, "default": "fromBase",
+                        "values": {"current", "alwaysCreate", "fromBase"},
+                        "description": "How the working branch is selected."},
+    "git.branch.baseBranches": {"type": list, "default": ["main"],
+                                "description": "Bases used by fromBase branch selection and allowed/default delivery targets.",
+                                "constraints": ["unique non-empty strings",
+                                                "non-empty when git.branch.mode=fromBase"]},
+    "git.branch.deleteAfterIntegration": {"type": bool, "default": False,
+                                          "description": "Whether local and remote working branches are deleted after successful integration."},
+    "git.integration.mode": {"type": str, "default": "localMerge",
+                             "values": {"localMerge", "pullRequest"},
+                             "description": "Selects local integration or pull-request delivery."},
+    "git.integration.mergeMethod": {"type": str, "default": "mergeCommit",
+                                    "values": {"squash", "mergeCommit"},
+                                    "description": "How local integration and explicitly authorized PR merges integrate the working branch."},
 }
 
-SCHEMA = {
-    "schemaVersion": int,
-    "workflow": {
-        "enabled": bool,
-    },
-    "git": {
-        "sync": {
-            "mode": str,
-            "updateMethod": str,
-        },
-        "backup": {
-            "mode": str,
-            "method": str,
-        },
-        "commit": {
-            "mode": str,
-        },
-        "branch": {
-            "mode": str,
-            "baseBranches": list,
-            "deleteAfterIntegration": bool,
-        },
-        "integration": {
-            "mode": str,
-            "mergeMethod": str,
-        },
-    },
-}
 
-ALLOWED_VALUES = {
-    "git.sync.mode": {"none", "fetch", "update"},
-    "git.sync.updateMethod": {"ffOnly", "rebase", "merge"},
-    "git.backup.mode": {"none", "tracked", "untracked", "all"},
-    "git.backup.method": {"stash", "commit"},
-    "git.commit.mode": {"manual", "automatic"},
-    "git.branch.mode": {"current", "alwaysCreate", "fromBase"},
-    "git.integration.mode": {"localMerge", "pullRequest"},
-    "git.integration.mergeMethod": {"squash", "mergeCommit"},
-}
+def nested_specs(field):
+    result = {}
+    for path, spec in SETTING_SPECS.items():
+        current = result
+        keys = path.split(".")
+        for key in keys[:-1]:
+            current = current.setdefault(key, {})
+        current[keys[-1]] = deepcopy(spec[field]) if field == "default" else spec[field]
+    return result
 
-SETTING_DESCRIPTIONS = {
-    "schemaVersion": "Project settings schema version.",
-    "workflow.enabled": "Whether this repository uses git-workflow.",
-    "git.sync.mode": "Synchronization performed before workflow operations.",
-    "git.sync.updateMethod": "How an upstream update is applied.",
-    "git.backup.mode": "Local changes protected during repository preparation.",
-    "git.backup.method": "How selected local changes are protected.",
-    "git.commit.mode": "Whether workflow commits and pushes are automatic.",
-    "git.branch.mode": "How the working branch is selected.",
-    "git.branch.baseBranches": "Bases used by fromBase branch selection and allowed/default delivery targets.",
-    "git.branch.deleteAfterIntegration": "Whether local and remote working branches are deleted after successful integration.",
-    "git.integration.mode": "Selects local integration or pull-request delivery.",
-    "git.integration.mergeMethod": "How local integration and explicitly authorized PR merges integrate the working branch.",
-}
 
-SETTING_CONSTRAINTS = {
-    "git.branch.baseBranches": [
-        "unique non-empty strings",
-        "non-empty when git.branch.mode=fromBase",
-    ],
-}
+DEFAULT_SETTINGS = nested_specs("default")
+SCHEMA = nested_specs("type")
+ALLOWED_VALUES = {path: spec["values"] for path, spec in SETTING_SPECS.items()
+                  if "values" in spec}
 
 SCHEMA_TYPE_NAMES = {
     bool: "boolean",
@@ -109,7 +72,8 @@ SCHEMA_TYPE_NAMES = {
     list: "list[string]",
 }
 
-NON_CONFIGURABLE_PATHS = {"schemaVersion"}
+NON_CONFIGURABLE_PATHS = {path for path, spec in SETTING_SPECS.items()
+                          if not spec.get("configurable", True)}
 
 
 def fail(message):
@@ -210,9 +174,9 @@ def schema_entry(path):
         entry["type"] = "enum"
         entry["values"] = sorted(ALLOWED_VALUES[path])
 
-    entry["description"] = SETTING_DESCRIPTIONS[path]
-    if path in SETTING_CONSTRAINTS:
-        entry["constraints"] = SETTING_CONSTRAINTS[path]
+    entry["description"] = SETTING_SPECS[path]["description"]
+    if "constraints" in SETTING_SPECS[path]:
+        entry["constraints"] = SETTING_SPECS[path]["constraints"]
     return entry
 
 

@@ -3,6 +3,9 @@ set -Eeuo pipefail
 
 WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/backup.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/sync.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/branch.sh"
 
 parse_prepare_args() {
   while [[ $# -gt 0 ]]; do

@@ -20,13 +20,15 @@ initialize_delivery pullRequest
 resolve_delivery_base
 
 if [[ "$PR_ACTION" == submit ]]; then
-  push_branch "$working_branch" "$base_branch"
   remote="$(remote_for_branch "$working_branch" "$base_branch")"
   git fetch --quiet "$remote" "refs/heads/$base_branch:refs/remotes/$remote/$base_branch"
   base_ref="refs/remotes/$remote/$base_branch"
+  git rev-parse --verify "$base_ref^{commit}" >/dev/null
   [[ "$(git rev-list --count "$base_ref..$working_branch")" != 0 ]] || fail "working branch has no commits to submit"
   PR_TITLE="$(branch_summary "$working_branch" "$base_ref")"
   PR_BODY="$(printf '## Summary\n\n'; git log --reverse --format='- %s' "$base_ref..$working_branch")"
+  [[ -n "$PR_TITLE" && -n "$PR_BODY" ]] || fail "cannot derive PR metadata"
+  push_branch "$working_branch" "$base_branch"
   if [[ -z "$pr_url" ]]; then
     pr_url="$(gh pr create --base "$base_branch" --head "$working_branch" --title "$PR_TITLE" --body "$PR_BODY")"
   else

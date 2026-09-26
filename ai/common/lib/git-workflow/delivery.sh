@@ -92,8 +92,11 @@ branch_summary() {
 integrate_local_branch() {
   local working_branch="$1"
   local base_branch="$2"
+  local base_original_sha
   local delivery_sha
   local merge_needed=true
+
+  base_original_sha="$(git rev-parse "$base_branch^{commit}")"
 
   if [[ "$INTEGRATION_MERGE_METHOD" == "squash" && -z "$INTEGRATION_MESSAGE" ]]; then
     INTEGRATION_MESSAGE="$(branch_summary "$working_branch" "$base_branch")"
@@ -113,9 +116,9 @@ integrate_local_branch() {
 
       if [[ "$merge_needed" == true ]]; then
         if [[ -n "$INTEGRATION_MESSAGE" ]]; then
-          git merge --quiet --no-ff -m "$INTEGRATION_MESSAGE" "$working_branch"
+          git merge --quiet --no-ff -m "$INTEGRATION_MESSAGE" "$working_branch" || restore_failed_integration "$working_branch" "$base_original_sha"
         else
-          git merge --quiet --no-ff --no-edit "$working_branch"
+          git merge --quiet --no-ff --no-edit "$working_branch" || restore_failed_integration "$working_branch" "$base_original_sha"
         fi
       fi
       ;;
@@ -125,8 +128,8 @@ integrate_local_branch() {
       fi
 
       if [[ "$merge_needed" == true ]]; then
-        git merge --quiet --squash "$working_branch"
-        git commit --quiet -m "$INTEGRATION_MESSAGE"
+        git merge --quiet --squash "$working_branch" || restore_failed_integration "$working_branch" "$base_original_sha"
+        git commit --quiet -m "$INTEGRATION_MESSAGE" || restore_failed_integration "$working_branch" "$base_original_sha"
       fi
       ;;
     *)
@@ -150,6 +153,16 @@ integrate_local_branch() {
     "$INTEGRATION_MERGE_METHOD" \
     "${delivery_sha:0:7}" \
     "$INTEGRATION_BRANCH_DELETED"
+}
+
+restore_failed_integration() {
+  local working_branch="$1"
+  local base_original_sha="$2"
+
+  git merge --abort >/dev/null 2>&1 || true
+  git reset --hard --quiet "$base_original_sha" || fail "integration failed and base recovery failed"
+  git checkout -q "$working_branch" || fail "integration failed and working branch checkout failed"
+  fail "local integration failed; base and working branch were restored"
 }
 
 initialize_delivery() {
