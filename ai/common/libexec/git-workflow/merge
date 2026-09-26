@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/delivery.sh"
+
+CURRENT_ACTION="merge"
+parse_merge_args "$@"
+initialize_delivery localMerge
+integrate_local_branch "$working_branch" "$base_branch"

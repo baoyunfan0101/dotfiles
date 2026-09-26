@@ -4,7 +4,7 @@ set -Eeuo pipefail
 WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
 
-parse_start_args() {
+parse_prepare_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --branch-name)
@@ -27,14 +27,14 @@ parse_start_args() {
   done
 }
 
-print_start_result() {
+print_prepare_result() {
   local backup_result="none"
 
   if [[ "$BACKUP_CREATED" == true ]]; then
     backup_result="$BACKUP_METHOD"
   fi
 
-  printf '[git] start ok backup=%s sync=%s branch=%s base=%s created=%s\n' \
+  printf '[git] prepare ok backup=%s sync=%s branch=%s base=%s created=%s\n' \
     "$backup_result" \
     "$SYNC_RESULT" \
     "$WORKING_BRANCH" \
@@ -42,20 +42,19 @@ print_start_result() {
     "$BRANCH_CREATED"
 }
 
-start() {
-  CURRENT_ACTION="start"
-  parse_start_args "$@"
+prepare() {
+  CURRENT_ACTION="prepare"
+  parse_prepare_args "$@"
   preflight_core
   require_repository
 
   if ! project_workflow_enabled; then
-    printf '[git] start skip reason=workflow-disabled\n'
+    printf '[git] prepare skip reason=workflow-disabled\n'
     return 0
   fi
 
-  preflight_delivery
   ORIGINAL_BRANCH="$(current_branch)"
-  load_start_settings
+  load_prepare_settings
 
   create_backup
   sync_current_branch "$ORIGINAL_BRANCH"
@@ -63,7 +62,7 @@ start() {
   reapply_backup
 
   WORKING_BRANCH="$(current_branch)"
-  print_start_result
+  print_prepare_result
 }
 
-start "$@"
+prepare "$@"

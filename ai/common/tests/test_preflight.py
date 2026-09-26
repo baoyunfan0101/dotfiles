@@ -61,33 +61,36 @@ class PreflightTests(unittest.TestCase):
         settings["git"]["integration"]["mode"] = mode
         (directory / "project.json").write_text(json.dumps(settings))
 
-    def start(self):
-        return self.run_action("start")
+    def prepare(self):
+        return self.run_action("prepare")
 
     def run_action(self, action, cwd=None):
         arguments = {
-            "start": ["--branch-name", "feat/test"],
+            "prepare": ["--branch-name", "feat/test"],
             "commit": ["--message", "Change", "--all"],
-            "finish": [],
+            "merge": [],
             "push": [],
+            "pr submit": [],
+            "pr merge": [],
         }
         return subprocess.run(
-            [BASH, str(COMMON / "bin/git-workflow"), action, *arguments[action]],
+            [BASH, str(COMMON / "bin/git-workflow"), *action.split(), *arguments[action]],
             cwd=self.repo if cwd is None else cwd,
             env={**self.env, "PATH": str(self.bin)},
             capture_output=True, text=True,
         )
 
     def assert_ready(self):
-        result = self.start()
+        result = self.prepare()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
-        self.assertEqual(result.stdout, "[git] start ok backup=none sync=skipped "
+        self.assertEqual(result.stdout, "[git] prepare ok backup=none sync=skipped "
                          "branch=feat/test base=main created=true\n")
 
-    def assert_blocked(self, check, reason, required_by, fix, action="start"):
-        (self.repo / "tracked").write_text("changed\n")
-        (self.repo / "untracked").write_text("untracked\n")
+    def assert_blocked(self, check, reason, required_by, fix, action="prepare"):
+        if not action.startswith("pr "):
+            (self.repo / "tracked").write_text("changed\n")
+            (self.repo / "untracked").write_text("untracked\n")
         before = {str(p.relative_to(self.repo)): p.read_bytes()
                   for p in self.repo.rglob("*") if p.is_file()}
         result = self.run_action(action)
@@ -101,17 +104,19 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(before, after)
         calls = self.log.read_text().splitlines() if self.log.exists() else []
         allowed = {"rev-parse --show-toplevel", "rev-parse --is-inside-work-tree"}
-        if action == "finish":
+        if action.startswith("pr "):
             allowed.update({"symbolic-ref --quiet --short HEAD",
                             "config --get branch.feat/test.agentWorkflowBase",
-                            "config --bool --get branch.feat/test.agentWorkflowCreated"})
+                            "config --bool --get branch.feat/test.agentWorkflowCreated",
+                            "diff --quiet --", "diff --cached --quiet --",
+                            "ls-files --others --exclude-standard"})
         self.assertTrue(all(call in allowed for call in calls), calls)
 
     def test_local_merge_without_gh(self):
         self.assert_ready()
 
     def test_removed_commands_are_rejected(self):
-        for command in ("prepare", "integrate"):
+        for command in ("start", "finish", "integrate"):
             result = subprocess.run(
                 [BASH, str(COMMON / "bin/git-workflow"), command],
                 cwd=self.repo, env=self.env, capture_output=True, text=True,
@@ -125,7 +130,7 @@ class PreflightTests(unittest.TestCase):
         settings["git"]["integration"]["mode"] = "pullRequest"
         (directory / "project.json").write_text(json.dumps(settings))
 
-        for action in ("start", "commit", "finish", "push"):
+        for action in ("prepare", "commit", "merge", "push", "pr submit", "pr merge"):
             result = self.run_action(action)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(
@@ -134,9 +139,10 @@ class PreflightTests(unittest.TestCase):
             )
 
     def test_pull_request_without_gh(self):
-        self.configure("pullRequest", sync="fetch")
-        self.assert_blocked("gh", "command not found", "git.integration.mode:pullRequest",
-                            "install gh and ensure it is on PATH")
+        self.configure("pullRequest")
+        self.git("add", ".")
+        self.git("commit", "-qm", "Configure")
+        self.assert_ready()
 
     def test_disabled_workflow_preserves_repository_and_never_calls_gh(self):
         marker = self.root / "gh-called"
@@ -156,7 +162,7 @@ class PreflightTests(unittest.TestCase):
             before = {str(p.relative_to(self.repo)): p.read_bytes()
                       for p in self.repo.rglob("*") if p.is_file()}
 
-            for action in ("start", "commit", "finish", "push"):
+            for action in ("prepare", "commit", "merge", "push", "pr submit", "pr merge"):
                 with self.subTest(enabled=enabled, action=action):
                     result = self.run_action(action)
                     self.assertEqual(result.returncode, 0, result.stderr)
@@ -173,10 +179,11 @@ class PreflightTests(unittest.TestCase):
         self.assertTrue(all(call in allowed for call in calls), calls)
 
     def test_pull_request_without_authentication(self):
-        self.configure("pullRequest", sync="fetch")
+        self.configure("pullRequest")
+        self.git("add", ".")
+        self.git("commit", "-qm", "Configure")
         self.stub("gh", 'echo "auth noise" >&2; exit 1')
-        self.assert_blocked("gh-auth", "authentication failed", "git.integration.mode:pullRequest",
-                            "run gh auth login")
+        self.assert_ready()
 
     def test_authenticated_pull_request(self):
         self.configure("pullRequest")
@@ -190,7 +197,7 @@ class PreflightTests(unittest.TestCase):
                         '{"schemaVersion":1,"git":{"integration":{"mode":"invalid"}}}'):
             with self.subTest(content=content):
                 (self.repo / ".ai/project.json").write_text(content)
-                for action in ("start", "commit", "finish", "push"):
+                for action in ("prepare", "commit", "merge", "push", "pr submit", "pr merge"):
                     self.assert_blocked("project-settings", "configuration invalid", "core",
                                         "fix .ai/project.json and run agent-project effective", action)
 
@@ -203,7 +210,7 @@ class PreflightTests(unittest.TestCase):
                 try:
                     fix = ("re-run the dotfiles AI installer" if command == "agent-project"
                            else f"install {command} and ensure it is on PATH")
-                    for action in ("start", "commit", "finish", "push"):
+                    for action in ("prepare", "commit", "merge", "push", "pr submit", "pr merge"):
                         self.assert_blocked(command, "command not found", "core", fix, action)
                 finally:
                     hidden.rename(path)
@@ -225,7 +232,7 @@ class PreflightTests(unittest.TestCase):
         outside.mkdir()
 
         for directory in (self.repo, outside):
-            for action in ("start", "commit", "finish", "push"):
+            for action in ("prepare", "commit", "merge", "push", "pr submit", "pr merge"):
                 with self.subTest(directory=directory.name, action=action):
                     lookups.write_text("")
                     result = self.run_action(action, cwd=directory)
@@ -243,35 +250,39 @@ class PreflightTests(unittest.TestCase):
                                          f'[git] {action} error reason="current directory is not inside a Git worktree"\n')
                         self.assertEqual(list(outside.iterdir()), [])
 
-    def test_finish_requires_gh_and_authentication(self):
+    def test_pr_requires_gh_and_authentication(self):
         self.configure("pullRequest")
+        self.git("add", ".")
+        self.git("commit", "-qm", "Configure")
         self.git("checkout", "-qb", "feat/test")
         self.git("config", "branch.feat/test.agentWorkflowBase", "main")
         self.git("config", "branch.feat/test.agentWorkflowCreated", "true")
-        self.assert_blocked("gh", "command not found", "git.integration.mode:pullRequest",
-                            "install gh and ensure it is on PATH", "finish")
+        for action in ("pr submit", "pr merge"):
+            self.assert_blocked("gh", "command not found", "git.integration.mode:pullRequest",
+                                "install gh and ensure it is on PATH", action)
         self.stub("gh", "exit 1")
-        self.assert_blocked("gh-auth", "authentication failed", "git.integration.mode:pullRequest",
-                            "run gh auth login", "finish")
+        for action in ("pr submit", "pr merge"):
+            self.assert_blocked("gh-auth", "authentication failed", "git.integration.mode:pullRequest",
+                                "run gh auth login", action)
 
-    def test_non_workflow_finish_skips_without_gh(self):
+    def test_non_workflow_delivery_fails_without_gh(self):
         self.configure("pullRequest")
         before = {str(p.relative_to(self.repo)): p.read_bytes()
                   for p in self.repo.rglob("*") if p.is_file()}
-        result = self.run_action("finish")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "[git] finish skip reason=no-workflow-created-branch\n")
-        self.assertEqual(result.stderr, "")
+        result = self.run_action("pr submit")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("workflow working branch", result.stderr)
+        self.assertEqual(result.stdout, "")
         after = {str(p.relative_to(self.repo)): p.read_bytes()
                  for p in self.repo.rglob("*") if p.is_file()}
         self.assertEqual(before, after)
 
-    def test_non_workflow_finish_does_not_check_authentication(self):
+    def test_non_workflow_delivery_does_not_check_authentication(self):
         self.configure("pullRequest")
         self.stub("gh", f'printf called > {shlex.quote(str(self.root / "gh-called"))}; exit 1')
-        result = self.run_action("finish")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "[git] finish skip reason=no-workflow-created-branch\n")
+        result = self.run_action("pr merge")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("workflow working branch", result.stderr)
         self.assertFalse((self.root / "gh-called").exists())
 
     def test_commit_and_push_do_not_require_gh(self):

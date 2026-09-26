@@ -3,14 +3,16 @@ CURRENT_ACTION="workflow"
 usage() {
   cat <<EOF2
 Usage:
-  git-workflow start [--branch-name NAME]
+  git-workflow prepare [--branch-name NAME]
   git-workflow commit [--override-manual] --message MESSAGE (--all | -- PATH...)
   git-workflow push [--override-manual]
-  git-workflow finish [options]
+  git-workflow merge [--message MESSAGE]
+  git-workflow pr submit
+  git-workflow pr merge
 
 Commands:
-  start
-      Start a repository-changing task once before editing: protect changes,
+  prepare
+      Prepare for repository-changing work before editing: protect changes,
       synchronize, select the working branch, and restore protected changes.
 
   commit
@@ -20,15 +22,19 @@ Commands:
       Auxiliary operation for an explicitly needed push outside commit: push
       the current branch according to project settings.
 
-  finish
-      Run once when a workflow-created task is complete. Deliver by local
-      integration or pull request according to project settings and user scope.
+  merge
+      Integrate a workflow-created branch locally only with explicit user
+      authorization. Requires localMerge mode.
+
+  pr
+      Submit or merge a pull request only with explicit user authorization.
+      Requires pullRequest mode. See git-workflow pr --help.
 
 Read-only tasks do not use workflow commands.
 
-Start options:
+Prepare options:
   --branch-name NAME
-      Candidate task branch name.
+      Candidate working branch name.
 
 Commit options:
   --message MESSAGE
@@ -48,21 +54,31 @@ Push options:
   --override-manual
       Allow an explicitly requested push when git.commit.mode is manual.
 
-Finish options:
+Merge options:
   --message MESSAGE
       Override the derived squash message or Git's default merge-commit message.
 
-  --title TITLE
-      Override the derived pull request title.
-
-  --body BODY
-      Optional pull request body; mutually exclusive with --body-file.
-
-  --body-file FILE
-      Read an optional pull request body from FILE; mutually exclusive with --body.
-
   -h, --help
       Show this help.
+EOF2
+}
+
+pr_usage() {
+  cat <<EOF2
+Usage:
+  git-workflow pr submit
+  git-workflow pr merge
+
+Commands:
+  submit
+      Create or update the open PR for the working branch and base, using
+      complete branch history. Requires an explicit user request. Stops at URL.
+
+  merge
+      Merge an existing open PR only with explicit user authorization, using
+      git.integration.mergeMethod. Sync base and apply configured cleanup.
+
+PR submission, CI success, and task completion do not authorize merging.
 EOF2
 }
 

@@ -20,15 +20,17 @@
 
 Use `git-workflow` for repository-changing tasks. Do not run workflow commands for read-only tasks or reproduce their Git operations manually.
 
-Lifecycle: start -> edit -> commit* -> finish. Use `git-workflow --help` for command syntax and options.
+Development: prepare -> edit -> commit*. Delivery requires explicit user authorization. Use `git-workflow --help` for syntax and options.
 
-Start once before the task's first edit:
+Run before each repository-changing work session:
 
 ```bash
-git-workflow start --branch-name <candidate-branch>
+git-workflow prepare --branch-name <candidate-branch>
 ```
 
-If `start` reports `[git] start skip reason=workflow-disabled`, do not use further `git-workflow` commands for that task.
+If `prepare` reports `workflow-disabled`, do not use further workflow commands for that work.
+
+A Task Spec does not define a branch boundary. A working branch may contain multiple Task Specs and atomic commits.
 
 Commit each atomic change by path, as often as needed:
 
@@ -36,11 +38,10 @@ Commit each atomic change by path, as often as needed:
 git-workflow commit --message "<message>" -- <paths>...
 ```
 
-Finish the workflow-created task once when complete, within the user's authorized delivery scope:
-
-```bash
-git-workflow finish
-```
+- Run `git-workflow pr submit` only when the user explicitly asks to submit, create, or update a PR.
+- Run `git-workflow pr merge` only when the user explicitly authorizes merging the PR (including "approve").
+- Run `git-workflow merge` only when the user explicitly authorizes local integration.
+- Task Spec or commit completion does not authorize PR submission or integration. Never infer merge authorization from PR submission, CI success, or task completion.
 
 Use `--all` only for one atomic change. Use `--override-manual` only for an explicit user request blocked by manual mode.
 

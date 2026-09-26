@@ -1,18 +1,11 @@
-#!/usr/bin/env bash
-set -Eeuo pipefail
-
-WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
-
 INTEGRATION_MERGE_METHOD=""
 DELETE_AFTER_INTEGRATION=false
 INTEGRATION_MESSAGE=""
 PR_TITLE=""
 PR_BODY=""
-PR_BODY_FILE=""
 INTEGRATION_BRANCH_DELETED=false
 
-parse_finish_args() {
+parse_merge_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --message)
@@ -24,46 +17,15 @@ parse_finish_args() {
         INTEGRATION_MESSAGE="${1#*=}"
         shift
         ;;
-      --title)
-        [[ $# -ge 2 ]] || fail "missing value for --title"
-        PR_TITLE="$2"
-        shift 2
-        ;;
-      --title=*)
-        PR_TITLE="${1#*=}"
-        shift
-        ;;
-      --body)
-        [[ $# -ge 2 ]] || fail "missing value for --body"
-        PR_BODY="$2"
-        shift 2
-        ;;
-      --body=*)
-        PR_BODY="${1#*=}"
-        shift
-        ;;
-      --body-file)
-        [[ $# -ge 2 ]] || fail "missing value for --body-file"
-        PR_BODY_FILE="$2"
-        shift 2
-        ;;
-      --body-file=*)
-        PR_BODY_FILE="${1#*=}"
-        shift
-        ;;
       -h|--help)
         usage
         exit 0
         ;;
       *)
-        fail "unknown finish option: $1"
+        fail "unknown merge option: $1"
         ;;
     esac
   done
-
-  if [[ -n "$PR_BODY" && -n "$PR_BODY_FILE" ]]; then
-    fail "--body and --body-file cannot be used together"
-  fi
 }
 
 delete_delivered_branch() {
@@ -92,7 +54,7 @@ delete_delivered_branch() {
   fi
 }
 
-task_summary() {
+branch_summary() {
   local working_branch="$1"
   local base_branch="$2"
   local subject
@@ -114,14 +76,14 @@ task_summary() {
   fi
 }
 
-finish_local_merge() {
+integrate_local_branch() {
   local working_branch="$1"
   local base_branch="$2"
   local delivery_sha
   local merge_needed=true
 
   if [[ "$INTEGRATION_MERGE_METHOD" == "squash" && -z "$INTEGRATION_MESSAGE" ]]; then
-    INTEGRATION_MESSAGE="$(task_summary "$working_branch" "$base_branch")"
+    INTEGRATION_MESSAGE="$(branch_summary "$working_branch" "$base_branch")"
   fi
 
   git checkout -q "$base_branch"
@@ -171,84 +133,41 @@ finish_local_merge() {
     INTEGRATION_BRANCH_DELETED=false
   fi
 
-  printf '[git] finish ok mode=localMerge target=%s method=%s sha=%s deleted=%s\n' \
+  printf '[git] merge ok mode=localMerge target=%s method=%s sha=%s deleted=%s\n' \
     "$base_branch" \
     "$INTEGRATION_MERGE_METHOD" \
     "${delivery_sha:0:7}" \
     "$INTEGRATION_BRANCH_DELETED"
 }
 
-create_pull_request() {
-  local working_branch="$1"
-  local base_branch="$2"
-  local pr_url
-
-  require_command gh
-  if [[ -z "$PR_TITLE" ]]; then
-    PR_TITLE="$(task_summary "$working_branch" "$base_branch")"
-  fi
-
-  push_branch "$working_branch" "$base_branch"
-  pr_url="$(gh pr view "$working_branch" --json url --jq '.url' 2>/dev/null || true)"
-
-  if [[ -z "$pr_url" ]]; then
-    if [[ -n "$PR_BODY_FILE" ]]; then
-      [[ -f "$PR_BODY_FILE" ]] || fail "pull request body file not found: $PR_BODY_FILE"
-      pr_url="$(gh pr create --base "$base_branch" --head "$working_branch" --title "$PR_TITLE" --body-file "$PR_BODY_FILE")"
-    else
-      pr_url="$(gh pr create --base "$base_branch" --head "$working_branch" --title "$PR_TITLE" --body "$PR_BODY")"
-    fi
-  fi
-
-  printf '[git] finish ok mode=pullRequest target=%s branch=%s url=%s\n' \
-    "$base_branch" \
-    "$working_branch" \
-    "$pr_url"
-}
-
-finish() {
-  CURRENT_ACTION="finish"
-  local working_branch
-  local base_branch
-  local branch_created
-
-  parse_finish_args "$@"
+initialize_delivery() {
+  local expected_mode="$1"
   preflight_core
   require_repository
 
   if ! project_workflow_enabled; then
-    printf '[git] finish skip reason=workflow-disabled\n'
-    return 0
+    printf '[git] %s skip reason=workflow-disabled\n' "$CURRENT_ACTION"
+    exit 0
   fi
 
-  load_finish_settings
+  load_delivery_settings
+
+  if [[ "$INTEGRATION_MODE" != "$expected_mode" ]]; then
+    if [[ "$INTEGRATION_MODE" == pullRequest ]]; then
+      fail "pullRequest mode requires git-workflow pr merge"
+    fi
+    fail "localMerge mode requires git-workflow merge"
+  fi
 
   working_branch="$(current_branch)"
   base_branch="$(workflow_base_branch "$working_branch")"
-  branch_created="$(workflow_branch_created "$working_branch")"
+  if [[ "$(workflow_branch_created "$working_branch")" != true || -z "$base_branch" || "$working_branch" == "$base_branch" ]]; then
+    fail "current branch must be a workflow working branch with a known base"
+  fi
 
-  if [[ "$branch_created" != true || -z "$base_branch" ]]; then
-    printf '[git] finish skip reason=no-workflow-created-branch\n'
-    return 0
+  if has_local_changes; then
+    fail "working tree must be clean before $CURRENT_ACTION"
   fi
 
   preflight_delivery
-
-  if has_local_changes; then
-    fail "working tree must be clean before finish"
-  fi
-
-  case "$INTEGRATION_MODE" in
-    localMerge)
-      finish_local_merge "$working_branch" "$base_branch"
-      ;;
-    pullRequest)
-      create_pull_request "$working_branch" "$base_branch"
-      ;;
-    *)
-      fail "unsupported git.integration.mode: $INTEGRATION_MODE"
-      ;;
-  esac
 }
-
-finish "$@"

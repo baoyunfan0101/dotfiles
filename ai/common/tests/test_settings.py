@@ -60,7 +60,11 @@ class SettingsTests(unittest.TestCase):
         self.assertIn("agent-project schema [path]", instructions)
         self.assertIn("agent-project --help", instructions)
         self.assertIn("git-workflow --help", instructions)
-        self.assertIn("start -> edit -> commit* -> finish", instructions)
+        for meaning in ("prepare -> edit -> commit*", "does not define a branch boundary",
+                        "multiple Task Specs", "explicitly asks", "pr submit",
+                        "explicitly authorizes", "pr merge", "local integration",
+                        "Never infer merge authorization", "CI success"):
+            self.assertIn(meaning, instructions)
         self.assertIn("Do not read or edit `.ai/project.json` directly", instructions)
         self.assertNotIn("git.integration.mode", instructions)
         self.assertNotIn("README", instructions)
@@ -119,7 +123,7 @@ class SettingsTests(unittest.TestCase):
             "type": "enum",
             "default": "localMerge",
             "values": ["localMerge", "pullRequest"],
-            "description": "Integration strategy used by finish.",
+            "description": "Selects local integration or pull-request delivery.",
         })
 
         result = self.run_project("schema", "git.unknown")

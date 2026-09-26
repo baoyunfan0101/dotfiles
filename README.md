@@ -56,17 +56,20 @@ For an enabled repository:
 
 ```text
 Read-only task           -> no workflow command
-Repository-changing task -> start -> edit -> commit* -> finish
+Development              -> prepare -> edit -> commit*
+Delivery                 -> explicit user authorization
 ```
 
 | Command | Meaning |
 |---|---|
-| `git-workflow start --branch-name <name>` | Begin a repository-changing task. |
+| `git-workflow prepare --branch-name <name>` | Protect changes, sync, and select a working branch. |
 | `git-workflow commit --message "<message>" -- <paths>...` | Record one atomic change. |
-| `git-workflow finish` | Finish and deliver the task according to configuration and user authorization. |
+| `git-workflow pr submit` | Create or update a PR when explicitly requested. |
+| `git-workflow pr merge` | Merge an existing PR when explicitly authorized. |
+| `git-workflow merge` | Integrate locally when explicitly authorized. |
 | `git-workflow push` | Auxiliary explicit push. |
 
-Run `start` once before editing, `commit` zero or more times, and `finish` at most once when complete. `push` is not a required lifecycle step. If `start` reports `workflow-disabled`, no further workflow commands are used for that task. See `git-workflow --help` for command options.
+A working branch may contain multiple Task Specs and atomic commits. Task completion, PR submission, and CI success do not authorize merging. PR metadata covers all commits from base to working branch. If `prepare` reports `workflow-disabled`, stop using workflow commands for that work. See `git-workflow --help` and `git-workflow pr --help`.
 
 ## Project Configuration
 
@@ -105,7 +108,7 @@ See [Project Settings](ai/project-settings.md) for the complete configuration re
 ./test.sh
 ```
 
-GitHub Actions runs the same test command on every push and pull request.
+GitHub Actions runs the same test command for pull requests targeting `main`.
 
 Tests use temporary homes, repositories, local bare remotes, isolated configuration directories, and a stubbed `gh`. Both installer modes run inside the sandbox, which is removed on exit. Tests do not install into the real user environment or contact GitHub.
 
