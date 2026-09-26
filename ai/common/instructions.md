@@ -2,9 +2,9 @@
 
 ## Authoring
 
-- Match the user's language unless requested otherwise.
-- Preserve existing comments unless explicitly requested otherwise.
-- Use ASCII unless explicitly requested otherwise.
+- User-facing responses: match the language of the user's latest message unless requested otherwise.
+- Project files: use ASCII only unless requested otherwise.
+- Existing comments: preserve them while their code or section remains unless requested otherwise.
 - When showing Markdown containing fenced code blocks, use `~~~md` as the outer fence.
 
 ## Project Configuration
