@@ -113,6 +113,18 @@ Tests use temporary homes, repositories, local bare remotes, isolated configurat
 
 Use the Quick Start command for normal installation and updates. It keeps a checkout at `~/.local/share/dotfiles` and runs the installer from there.
 
+Dotfiles does not own the entire `~/.codex/AGENTS.md` file. It manages only the content inside its marked block; personal rules outside the block are preserved:
+
+```md
+# Personal rules
+
+<!-- BEGIN baoyunfan0101/dotfiles managed block -->
+
+...dotfiles instructions...
+
+<!-- END baoyunfan0101/dotfiles managed block -->
+```
+
 For development from an existing checkout, install using symlinks:
 
 ```bash

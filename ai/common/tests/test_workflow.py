@@ -131,6 +131,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         manifests = list(Path(install_env["XDG_STATE_HOME"]).glob("dotfiles/ai/*.manifest"))
         self.assertEqual({path.name for path in manifests}, {"common.manifest", "codex.manifest"})
+        installed_agents = destination / ".codex/AGENTS.md"
+        self.assertTrue(installed_agents.is_file())
+        self.assertFalse(installed_agents.is_symlink())
+        self.assertIn("<!-- BEGIN baoyunfan0101/dotfiles managed block -->",
+                      installed_agents.read_text())
         for manifest in manifests:
             for target in manifest.read_text().splitlines():
                 self.assertIn(destination, Path(target).parents)

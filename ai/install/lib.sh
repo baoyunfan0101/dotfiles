@@ -10,6 +10,10 @@ MODULE_NAME=""
 MODULE_DIR=""
 MODULE_SOURCES=()
 MODULE_TARGETS=()
+MODULE_BLOCK_SOURCES=()
+MODULE_BLOCK_TARGETS=()
+MODULE_BLOCK_BEGINS=()
+MODULE_BLOCK_ENDS=()
 MANAGED_TARGETS=()
 
 usage() {
@@ -199,6 +203,10 @@ module_reset() {
   MODULE_DIR="$AI_DIR/$MODULE_NAME"
   MODULE_SOURCES=()
   MODULE_TARGETS=()
+  MODULE_BLOCK_SOURCES=()
+  MODULE_BLOCK_TARGETS=()
+  MODULE_BLOCK_BEGINS=()
+  MODULE_BLOCK_ENDS=()
 }
 
 module_path() {
@@ -213,13 +221,38 @@ module_path() {
     return 1
   fi
 
-  if array_contains "$target" ${MODULE_TARGETS[@]+"${MODULE_TARGETS[@]}"}; then
+  if array_contains "$target" ${MODULE_TARGETS[@]+"${MODULE_TARGETS[@]}"} || \
+    array_contains "$target" ${MODULE_BLOCK_TARGETS[@]+"${MODULE_BLOCK_TARGETS[@]}"}; then
     echo "Duplicate module target: $target" >&2
     return 1
   fi
 
   MODULE_SOURCES+=("$source")
   MODULE_TARGETS+=("$target")
+}
+
+module_managed_block() {
+  local relative_source="$1"
+  local target="$2"
+  local begin_marker="$3"
+  local end_marker="$4"
+  local source="$MODULE_DIR/$relative_source"
+
+  if [[ ! -f "$source" ]]; then
+    echo "Missing module source: $source" >&2
+    return 1
+  fi
+
+  if array_contains "$target" ${MODULE_TARGETS[@]+"${MODULE_TARGETS[@]}"} || \
+    array_contains "$target" ${MODULE_BLOCK_TARGETS[@]+"${MODULE_BLOCK_TARGETS[@]}"}; then
+    echo "Duplicate module target: $target" >&2
+    return 1
+  fi
+
+  MODULE_BLOCK_SOURCES+=("$source")
+  MODULE_BLOCK_TARGETS+=("$target")
+  MODULE_BLOCK_BEGINS+=("$begin_marker")
+  MODULE_BLOCK_ENDS+=("$end_marker")
 }
 
 module_dir_contents() {
@@ -272,6 +305,132 @@ remove_target() {
   rm -rf "$target"
 }
 
+MANAGED_BLOCK_BEGIN_LINE=0
+MANAGED_BLOCK_END_LINE=0
+
+inspect_managed_block() {
+  local target="$1"
+  local begin_marker="$2"
+  local end_marker="$3"
+  local line
+  local line_number=0
+  local begin_count=0
+  local end_count=0
+
+  MANAGED_BLOCK_BEGIN_LINE=0
+  MANAGED_BLOCK_END_LINE=0
+
+  if [[ ! -e "$target" && ! -L "$target" ]]; then
+    return 0
+  fi
+
+  if [[ ! -f "$target" ]]; then
+    echo "Managed block target is not a regular file: $target" >&2
+    return 1
+  fi
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    ((line_number += 1))
+    if [[ "$line" == *"$begin_marker"* ]]; then
+      ((begin_count += 1))
+      MANAGED_BLOCK_BEGIN_LINE="$line_number"
+      [[ "$line" == "$begin_marker" ]] || begin_count=2
+    fi
+    if [[ "$line" == *"$end_marker"* ]]; then
+      ((end_count += 1))
+      MANAGED_BLOCK_END_LINE="$line_number"
+      [[ "$line" == "$end_marker" ]] || end_count=2
+    fi
+  done < "$target"
+
+  if [[ "$begin_count" == 0 && "$end_count" == 0 ]]; then
+    return 0
+  fi
+
+  if [[ "$begin_count" != 1 || "$end_count" != 1 || \
+        "$MANAGED_BLOCK_BEGIN_LINE" -ge "$MANAGED_BLOCK_END_LINE" ]]; then
+    printf '%s contains malformed dotfiles managed block markers\n' "$(basename "$target")" >&2
+    return 1
+  fi
+}
+
+append_block_separator() {
+  local source="$1"
+  local ending
+
+  if [[ ! -s "$source" ]]; then
+    return 0
+  fi
+
+  ending="$(tail -c 2 "$source"; printf x)"
+  if [[ "$ending" == $'\n\n'x ]]; then
+    return 0
+  fi
+  if [[ "$ending" == *$'\n'x ]]; then
+    printf '\n'
+  else
+    printf '\n\n'
+  fi
+}
+
+print_managed_block() {
+  local source="$1"
+  local begin_marker="$2"
+  local end_marker="$3"
+
+  printf '%s\n\n' "$begin_marker"
+  cat "$source"
+  append_block_separator "$source"
+  printf '%s\n' "$end_marker"
+}
+
+install_managed_block() {
+  local source="$1"
+  local target="$2"
+  local begin_marker="$3"
+  local end_marker="$4"
+  local temporary
+
+  inspect_managed_block "$target" "$begin_marker" "$end_marker"
+  mkdir -p "$(dirname "$target")"
+  temporary="$(mktemp "$target.XXXXXX")"
+
+  if [[ "$MANAGED_BLOCK_BEGIN_LINE" -gt 0 ]]; then
+    if [[ "$MANAGED_BLOCK_BEGIN_LINE" -gt 1 ]]; then
+      head -n "$((MANAGED_BLOCK_BEGIN_LINE - 1))" "$target" > "$temporary"
+    fi
+    print_managed_block "$source" "$begin_marker" "$end_marker" >> "$temporary"
+    tail -n "+$((MANAGED_BLOCK_END_LINE + 1))" "$target" >> "$temporary"
+  else
+    if [[ -e "$target" || -L "$target" ]]; then
+      cat "$target" > "$temporary"
+      append_block_separator "$target" >> "$temporary"
+    fi
+    print_managed_block "$source" "$begin_marker" "$end_marker" >> "$temporary"
+  fi
+
+  mv -f "$temporary" "$target"
+  echo "Updated managed block: $target"
+}
+
+remove_managed_block() {
+  local target="$1"
+  local begin_marker="$2"
+  local end_marker="$3"
+  local temporary
+
+  inspect_managed_block "$target" "$begin_marker" "$end_marker"
+  [[ "$MANAGED_BLOCK_BEGIN_LINE" -gt 0 ]] || return 0
+
+  temporary="$(mktemp "$target.XXXXXX")"
+  if [[ "$MANAGED_BLOCK_BEGIN_LINE" -gt 1 ]]; then
+    head -n "$((MANAGED_BLOCK_BEGIN_LINE - 1))" "$target" > "$temporary"
+  fi
+  tail -n "+$((MANAGED_BLOCK_END_LINE + 1))" "$target" >> "$temporary"
+  mv -f "$temporary" "$target"
+  echo "Removed managed block: $target"
+}
+
 prepare_install_target() {
   local target="$1"
 
@@ -322,6 +481,9 @@ clean_module() {
 
   for target in ${MANAGED_TARGETS[@]+"${MANAGED_TARGETS[@]}"}; do
     if ! array_contains "$target" ${MODULE_TARGETS[@]+"${MODULE_TARGETS[@]}"}; then
+      if array_contains "$target" ${MODULE_BLOCK_TARGETS[@]+"${MODULE_BLOCK_TARGETS[@]}"}; then
+        continue
+      fi
       remove_target "$target"
       echo "Removed stale target: $target"
     fi
@@ -334,6 +496,14 @@ install_module() {
 
   load_module "$module"
   read_manifest "$module"
+
+  for ((index = 0; index < ${#MODULE_BLOCK_TARGETS[@]}; index++)); do
+    install_managed_block \
+      "${MODULE_BLOCK_SOURCES[$index]}" \
+      "${MODULE_BLOCK_TARGETS[$index]}" \
+      "${MODULE_BLOCK_BEGINS[$index]}" \
+      "${MODULE_BLOCK_ENDS[$index]}"
+  done
 
   for ((index = 0; index < ${#MODULE_TARGETS[@]}; index++)); do
     install_path \
@@ -349,10 +519,22 @@ uninstall_module() {
   local module="$1"
   local manifest
   local target
+  local index
 
+  load_module "$module"
   read_manifest "$module"
 
+  for ((index = 0; index < ${#MODULE_BLOCK_TARGETS[@]}; index++)); do
+    remove_managed_block \
+      "${MODULE_BLOCK_TARGETS[$index]}" \
+      "${MODULE_BLOCK_BEGINS[$index]}" \
+      "${MODULE_BLOCK_ENDS[$index]}"
+  done
+
   for target in ${MANAGED_TARGETS[@]+"${MANAGED_TARGETS[@]}"}; do
+    if array_contains "$target" ${MODULE_BLOCK_TARGETS[@]+"${MODULE_BLOCK_TARGETS[@]}"}; then
+      continue
+    fi
     remove_target "$target"
     echo "Removed: $target"
   done

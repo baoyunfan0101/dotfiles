@@ -109,6 +109,8 @@ class BootstrapTests(unittest.TestCase):
         self.project_cli.write_text("old installation\n")
         personal_file = self.project_cli.parent / "personal-tool"
         personal_file.write_text("keep me\n")
+        agents_file = Path(self.env["CODEX_HOME"]) / "AGENTS.md"
+        agents_file.write_text("personal agent rules\n")
 
         for _ in range(2):
             result = self.bootstrap()
@@ -117,6 +119,9 @@ class BootstrapTests(unittest.TestCase):
             self.assertEqual(self.project_cli.resolve(),
                              (self.checkout / "ai/common/bin/agent-project").resolve())
             self.assertEqual(personal_file.read_text(), "keep me\n")
+            self.assertTrue(agents_file.read_text().startswith("personal agent rules\n"))
+            self.assertEqual(agents_file.read_text().count(
+                "<!-- BEGIN baoyunfan0101/dotfiles managed block -->"), 1)
 
     def test_missing_git_and_dirty_checkout_report_errors(self):
         env = dict(self.env)
