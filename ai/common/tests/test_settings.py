@@ -71,7 +71,8 @@ class SettingsTests(unittest.TestCase):
         authoring = instructions.split("## Authoring\n", 1)[1].split("\n## ", 1)[0]
         for meaning in ("User-facing responses", "user's latest message",
                         "Project files", "ASCII", "Existing comments",
-                        "code or section remains", "~~~md"):
+                        "code or section remains", "create backups directly",
+                        "configured workflows", "~~~md"):
             self.assertIn(meaning, authoring)
 
     def test_help(self):

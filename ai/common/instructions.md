@@ -5,6 +5,7 @@
 - User-facing responses: match the language of the user's latest message unless requested otherwise.
 - Project files: use ASCII only unless requested otherwise.
 - Existing comments: preserve them while their code or section remains unless requested otherwise.
+- Do not create backups directly; backups may only be created by configured workflows.
 - When showing Markdown containing fenced code blocks, use `~~~md` as the outer fence.
 
 ## Project Configuration
