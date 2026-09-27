@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+
+CURRENT_ACTION="restore"
+source_ref=HEAD
+paths=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --source)
+      [[ $# -ge 2 && -n "$2" ]] || fail "missing value for --source"
+      source_ref="$2"
+      shift 2
+      ;;
+    --source=*)
+      source_ref="${1#*=}"
+      [[ -n "$source_ref" ]] || fail "missing value for --source"
+      shift
+      ;;
+    --)
+      shift
+      paths=("$@")
+      break
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *) fail "unknown restore option: $1" ;;
+  esac
+done
+
+[[ ${#paths[@]} -gt 0 ]] || fail "provide tracked paths after --"
+preflight_core
+require_repository
+if ! project_workflow_enabled; then
+  printf '[git] restore skip reason=workflow-disabled\n'
+  exit 0
+fi
+
+git rev-parse --verify "$source_ref^{commit}" >/dev/null || fail "source ref is not a commit: $source_ref"
+for path in "${paths[@]}"; do
+  git ls-files --error-unmatch -- "$path" >/dev/null 2>&1 || fail "path is not tracked: $path"
+  [[ -n "$(git ls-tree -r --name-only "$source_ref" -- "$path")" ]] ||
+    fail "path is absent from source: $path"
+done
+git restore --worktree --source "$source_ref" -- "${paths[@]}" || fail "restore failed"
+printf '[git] restore ok source=%s paths=%s\n' "$source_ref" "${#paths[@]}"

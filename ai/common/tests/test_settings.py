@@ -66,6 +66,10 @@ class SettingsTests(unittest.TestCase):
                         "Never infer merge authorization", "CI success"):
             self.assertIn(meaning, instructions)
         self.assertIn("Do not read or edit `.ai/project.json` directly", instructions)
+        for meaning in ("Read-only Git commands may run directly", "Do not directly run Git commands",
+                        "workflow capability gap", "prepare --base <base> --branch-name <name>",
+                        "commit --amend", "restore", "revert", "cherry-pick", "rebase"):
+            self.assertIn(meaning, instructions)
         self.assertNotIn("git.integration.mode", instructions)
         self.assertNotIn("README", instructions)
 
