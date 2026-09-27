@@ -96,7 +96,8 @@ class WorkflowTests(unittest.TestCase):
                  for path in self.repo.rglob("*") if path.is_file() and ".git" not in path.relative_to(self.repo).parts})
 
     def assert_no_in_progress_git_operation(self):
-        for name in ("MERGE_HEAD", "rebase-merge", "rebase-apply"):
+        for name in ("MERGE_HEAD", "REVERT_HEAD", "CHERRY_PICK_HEAD", "REBASE_HEAD",
+                     "rebase-merge", "rebase-apply", "sequencer"):
             self.assertFalse((self.repo / ".git" / name).exists(), name)
         self.assertEqual(self.git("ls-files", "--unmerged"), "")
 
@@ -565,6 +566,7 @@ class WorkflowTests(unittest.TestCase):
         remote_head = self.git("ls-remote", "--heads", "origin", "feat/test")
         result = self.run_cli("revert", first, ok=False)
         self.assertIn("original branch and HEAD were restored", result.stderr)
+        self.assertEqual(self.git("branch", "--show-current"), "feat/test")
         self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
         self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test"), remote_head)
         self.assertEqual(self.git("status", "--porcelain"), "")
@@ -596,9 +598,12 @@ class WorkflowTests(unittest.TestCase):
         (self.repo / "tracked").write_text("working conflict\n")
         self.commit()
         original_head = self.git("rev-parse", "HEAD")
+        remote_head = self.git("ls-remote", "--heads", "origin", "feat/test")
         result = self.run_cli("cherry-pick", conflicting_sha, ok=False)
         self.assertIn("original branch and HEAD were restored", result.stderr)
+        self.assertEqual(self.git("branch", "--show-current"), "feat/test")
         self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test"), remote_head)
         self.assertEqual(self.git("status", "--porcelain"), "")
         self.assert_no_in_progress_git_operation()
 
@@ -698,8 +703,8 @@ class WorkflowTests(unittest.TestCase):
         self.save_settings(branch={"mode": "fromBase"})
         self.assertIn("created=false", self.prepare().stdout)
 
-    def test_prepare_explicit_base_starts_from_latest_base(self):
-        self.save_settings(sync={"mode": "update", "updateMethod": "ffOnly"})
+    def assert_prepare_explicit_base_starts_from_latest_base(self, sync_mode):
+        self.save_settings(sync={"mode": sync_mode, "updateMethod": "ffOnly"})
         self.git("push", "-q", "origin", "main")
         self.prepare()
         self.change()
@@ -720,6 +725,15 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual((self.repo / "user-note").read_text(), "protected\n")
         self.assertIn("user-note", self.git("status", "--porcelain"))
 
+    def test_prepare_explicit_base_starts_from_latest_base_when_sync_none(self):
+        self.assert_prepare_explicit_base_starts_from_latest_base("none")
+
+    def test_prepare_explicit_base_starts_from_latest_base_when_sync_fetch(self):
+        self.assert_prepare_explicit_base_starts_from_latest_base("fetch")
+
+    def test_prepare_explicit_base_starts_from_latest_base_when_sync_update(self):
+        self.assert_prepare_explicit_base_starts_from_latest_base("update")
+
     def test_prepare_explicit_base_validates_before_mutation(self):
         self.prepare()
         for arguments, message in (
@@ -732,8 +746,8 @@ class WorkflowTests(unittest.TestCase):
                 self.assertIn(message, self.run_cli("prepare", *arguments, ok=False).stderr)
                 self.assertEqual(self.git_snapshot(), before)
 
-    def test_prepare_explicit_base_sync_conflict_restores_original_branch(self):
-        self.save_settings(sync={"mode": "update", "updateMethod": "merge"})
+    def test_prepare_explicit_base_divergence_preserves_local_history(self):
+        self.save_settings(sync={"mode": "none"})
         self.git("push", "-q", "origin", "main")
         self.prepare()
         working_head = self.git("rev-parse", "HEAD")
@@ -743,7 +757,7 @@ class WorkflowTests(unittest.TestCase):
         (self.repo / "user-note").write_text("protected\n")
 
         result = self.run_cli("prepare", "--base", "main", "--branch-name", "feat/next", ok=False)
-        self.assertIn("base sync failed", result.stderr)
+        self.assertIn("local base diverged", result.stderr)
         self.assertEqual(self.git("branch", "--show-current"), "feat/test")
         self.assertEqual(self.git("rev-parse", "HEAD"), working_head)
         self.assertEqual(self.git("rev-parse", "main"), base_head)
@@ -751,6 +765,42 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual((self.repo / "user-note").read_text(), "protected\n")
         self.assertEqual(self.git("branch", "--list", "feat/next"), "")
         self.assert_no_in_progress_git_operation()
+
+    def test_prepare_explicit_base_fetch_and_update_failures_restore_changes(self):
+        self.save_settings(sync={"mode": "none"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        original_head = self.git("rev-parse", "HEAD")
+        base_head = self.git("rev-parse", "main")
+        remote_tip = self.git("--git-dir", str(self.remote), "commit-tree",
+                              "main^{tree}", "-p", base_head, "-m", "Remote base advance")
+        self.git("--git-dir", str(self.remote), "update-ref", "refs/heads/main", remote_tip)
+        self.change()
+        self.git("add", "tracked")
+        (self.repo / "user-note").write_text("protected\n")
+        original_status = self.git("status", "--porcelain")
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+
+        for operation, condition in (
+            ("fetch", '"$1" == fetch'),
+            ("update", '"$1" == merge && "$2" == --quiet && "$3" == --ff-only'),
+        ):
+            with self.subTest(operation=operation):
+                git_stub.write_text('#!/usr/bin/env bash\n'
+                                    f'if [[ {condition} ]]; then exit 1; fi\n'
+                                    f'exec "{git_executable}" "$@"\n')
+                git_stub.chmod(0o755)
+                result = self.run_cli("prepare", "--base", "main", "--branch-name", "feat/next", ok=False)
+                self.assertIn(f"base {operation} failed", result.stderr)
+                self.assertEqual(self.git("branch", "--show-current"), "feat/test")
+                self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
+                self.assertEqual(self.git("rev-parse", "main"), base_head)
+                self.assertEqual(self.git("status", "--porcelain"), original_status)
+                self.assertEqual((self.repo / "tracked").read_text(), "changed\n")
+                self.assertEqual((self.repo / "user-note").read_text(), "protected\n")
+                self.assertEqual(self.git("branch", "--list", "feat/next"), "")
+                self.assert_no_in_progress_git_operation()
 
     def test_prepare_explicit_base_retains_backup_on_restore_failure(self):
         self.save_settings(sync={"mode": "none"})

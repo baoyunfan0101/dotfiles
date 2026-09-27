@@ -2,6 +2,29 @@ SYNC_MODE=""
 SYNC_UPDATE_METHOD=""
 SYNC_RESULT="skipped"
 
+fetch_base_for_entry() {
+  local base_branch="$1"
+  local remote="$2"
+  local base_ref="refs/remotes/$remote/$base_branch"
+
+  git fetch --quiet "$remote" "refs/heads/$base_branch:$base_ref" || return $?
+  git rev-parse --verify "$base_ref^{commit}" >/dev/null || return $?
+  printf '%s\n' "$base_ref"
+}
+
+advance_base_for_entry() {
+  local base_branch="$1"
+  local base_ref="$2"
+
+  if ! git merge-base --is-ancestor HEAD "$base_ref"; then
+    printf 'local base diverged from fetched remote base: %s\n' "$base_branch" >&2
+    return 1
+  fi
+  git merge --quiet --ff-only "$base_ref" || return $?
+  [[ "$(git rev-parse HEAD)" == "$(git rev-parse "$base_ref")" ]] || return 1
+  SYNC_RESULT="updated"
+}
+
 recover_failed_sync() {
   local method="$1"
   local branch="$2"

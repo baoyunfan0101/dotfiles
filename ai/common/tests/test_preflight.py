@@ -16,6 +16,8 @@ COMMON = Path(__file__).resolve().parents[1]
 DEFAULT_SETTINGS = runpy.run_path(str(COMMON / "bin/agent-project"))["DEFAULT_SETTINGS"]
 GIT = shutil.which("git")
 BASH = shutil.which("bash")
+CORE_ACTIONS = ("prepare", "commit", "restore", "revert", "cherry-pick",
+                "rebase", "merge", "push", "pr submit", "pr merge")
 
 
 class PreflightTests(unittest.TestCase):
@@ -68,6 +70,10 @@ class PreflightTests(unittest.TestCase):
         arguments = {
             "prepare": ["--branch-name", "feat/test"],
             "commit": ["--message", "Change", "--all"],
+            "restore": ["--", "tracked"],
+            "revert": ["HEAD"],
+            "cherry-pick": ["HEAD"],
+            "rebase": [],
             "merge": [],
             "push": [],
             "pr submit": [],
@@ -93,6 +99,11 @@ class PreflightTests(unittest.TestCase):
             (self.repo / "untracked").write_text("untracked\n")
         before = {str(p.relative_to(self.repo)): p.read_bytes()
                   for p in self.repo.rglob("*") if p.is_file()}
+        git_before = (self.git("rev-parse", "HEAD"),
+                      self.git("symbolic-ref", "--short", "HEAD"),
+                      self.git("ls-files", "--stage"),
+                      self.git("for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/remotes"),
+                      self.git("status", "--porcelain"))
         result = self.run_action(action)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(result.stdout, "")
@@ -102,6 +113,11 @@ class PreflightTests(unittest.TestCase):
         after = {str(p.relative_to(self.repo)): p.read_bytes()
                  for p in self.repo.rglob("*") if p.is_file()}
         self.assertEqual(before, after)
+        self.assertEqual(git_before, (self.git("rev-parse", "HEAD"),
+                                      self.git("symbolic-ref", "--short", "HEAD"),
+                                      self.git("ls-files", "--stage"),
+                                      self.git("for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/remotes"),
+                                      self.git("status", "--porcelain")))
         calls = self.log.read_text().splitlines() if self.log.exists() else []
         allowed = {"rev-parse --show-toplevel", "rev-parse --is-inside-work-tree"}
         if action.startswith("pr "):
@@ -128,7 +144,7 @@ class PreflightTests(unittest.TestCase):
         settings["git"]["integration"]["mode"] = "pullRequest"
         (directory / "project.json").write_text(json.dumps(settings))
 
-        for action in ("prepare", "commit", "merge", "push", "pr submit", "pr merge"):
+        for action in CORE_ACTIONS:
             result = self.run_action(action)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(
@@ -160,7 +176,7 @@ class PreflightTests(unittest.TestCase):
             before = {str(p.relative_to(self.repo)): p.read_bytes()
                       for p in self.repo.rglob("*") if p.is_file()}
 
-            for action in ("prepare", "commit", "merge", "push", "pr submit", "pr merge"):
+            for action in CORE_ACTIONS:
                 with self.subTest(enabled=enabled, action=action):
                     result = self.run_action(action)
                     self.assertEqual(result.returncode, 0, result.stderr)
@@ -195,7 +211,7 @@ class PreflightTests(unittest.TestCase):
                         '{"schemaVersion":1,"git":{"integration":{"mode":"invalid"}}}'):
             with self.subTest(content=content):
                 (self.repo / ".ai/project.json").write_text(content)
-                for action in ("prepare", "commit", "merge", "push", "pr submit", "pr merge"):
+                for action in CORE_ACTIONS:
                     self.assert_blocked("project-settings", "configuration invalid", "core",
                                         "fix .ai/project.json and run agent-project effective", action)
 
@@ -208,7 +224,7 @@ class PreflightTests(unittest.TestCase):
                 try:
                     fix = ("re-run the dotfiles AI installer" if command == "agent-project"
                            else f"install {command} and ensure it is on PATH")
-                    for action in ("prepare", "commit", "merge", "push", "pr submit", "pr merge"):
+                    for action in CORE_ACTIONS:
                         self.assert_blocked(command, "command not found", "core", fix, action)
                 finally:
                     hidden.rename(path)
@@ -230,7 +246,7 @@ class PreflightTests(unittest.TestCase):
         outside.mkdir()
 
         for directory in (self.repo, outside):
-            for action in ("prepare", "commit", "merge", "push", "pr submit", "pr merge"):
+            for action in CORE_ACTIONS:
                 with self.subTest(directory=directory.name, action=action):
                     lookups.write_text("")
                     result = self.run_action(action, cwd=directory)

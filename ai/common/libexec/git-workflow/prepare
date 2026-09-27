@@ -76,6 +76,8 @@ restore_failed_base_entry() {
 prepare_from_base() {
   local original_branch="$1"
   local base_head
+  local base_ref
+  local base_remote
   local created_branch=""
 
   is_base_branch "$PREPARE_BASE" || fail "base is not configured in git.branch.baseBranches: $PREPARE_BASE"
@@ -87,11 +89,20 @@ prepare_from_base() {
   base_head="$(git rev-parse "$PREPARE_BASE^{commit}")"
 
   create_backup
+  if ! base_remote="$(remote_for_branch "$PREPARE_BASE")"; then
+    restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "" true "base remote resolution failed"
+  fi
+  if ! base_ref="$(fetch_base_for_entry "$PREPARE_BASE" "$base_remote")"; then
+    restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "" true "base fetch failed"
+  fi
+  if ! git merge-base --is-ancestor "$base_head" "$base_ref"; then
+    restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "" true "local base diverged from fetched remote base: $PREPARE_BASE"
+  fi
   if ! git checkout -q "$PREPARE_BASE"; then
     restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "" true "base checkout failed"
   fi
-  if ! sync_current_branch "$PREPARE_BASE"; then
-    restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "" true "base sync failed"
+  if ! advance_base_for_entry "$PREPARE_BASE" "$base_ref"; then
+    restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "" true "base update failed"
   fi
   if ! git checkout -q -b "$BRANCH_NAME"; then
     if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
