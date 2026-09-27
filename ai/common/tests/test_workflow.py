@@ -703,6 +703,70 @@ class WorkflowTests(unittest.TestCase):
         self.save_settings(branch={"mode": "fromBase"})
         self.assertIn("created=false", self.prepare().stdout)
 
+    def test_prepare_accepts_allowed_branch_types(self):
+        self.save_settings(branch={"mode": "alwaysCreate"})
+        for branch_type in ("feat", "fix", "chore", "docs", "refactor", "test",
+                            "ci", "build", "perf", "style", "revert", "hotfix"):
+            with self.subTest(branch_type=branch_type):
+                branch = f"{branch_type}/branch-validation"
+                result = self.run_cli("prepare", "--branch-name", branch)
+                self.assertIn(f"branch={branch} created=true", result.stdout)
+                self.git("switch", "main")
+
+    def test_prepare_rejects_invalid_branch_names_without_mutation(self):
+        self.save_settings(branch={"mode": "alwaysCreate"})
+        self.git("branch", "feat/existing")
+        for branch, message in (
+            ("", "--branch-name is required by the configured branch mode"),
+            ("codex/delete-session", "invalid branch type: codex"),
+            ("claude/delete-session", "invalid branch type: claude"),
+            ("agent/delete-session", "invalid branch type: agent"),
+            ("feature/delete-session", "invalid branch type: feature"),
+            ("delete-session", "branch name must use <type>/<description>: delete-session"),
+            ("feat/foo..bar", "invalid branch name: feat/foo..bar"),
+            ("feat/existing", "branch already exists: feat/existing"),
+        ):
+            with self.subTest(branch=branch):
+                before = self.git_snapshot()
+                result = self.run_cli("prepare", "--branch-name", branch, ok=False)
+                self.assertIn(message, result.stderr)
+                self.assertEqual(self.git_snapshot(), before)
+
+    def test_prepare_rejects_invalid_branch_before_backup_or_sync(self):
+        self.save_settings(branch={"mode": "alwaysCreate"},
+                           backup={"mode": "tracked", "method": "commit"},
+                           sync={"mode": "fetch"})
+        self.change()
+        before = self.git_snapshot()
+        result = self.run_cli("prepare", "--branch-name", "codex/invalid", ok=False)
+        self.assertIn("invalid branch type: codex", result.stderr)
+        self.assertEqual(self.git_snapshot(), before)
+        self.assertEqual(self.git("for-each-ref", "--format=%(refname)",
+                                  "refs/agent-workflow/backups/"), "")
+
+    def test_prepare_explicit_base_rejects_invalid_branch_without_mutation(self):
+        self.save_settings(branch={"mode": "current"})
+        before = self.git_snapshot()
+        result = self.run_cli("prepare", "--base", "main", "--branch-name",
+                              "codex/invalid", ok=False)
+        self.assertIn("invalid branch type: codex", result.stderr)
+        self.assertEqual(self.git_snapshot(), before)
+
+    def test_prepare_from_base_mode_rejects_invalid_branch_without_mutation(self):
+        self.save_settings(branch={"mode": "fromBase"})
+        before = self.git_snapshot()
+        result = self.run_cli("prepare", "--branch-name", "agent/invalid", ok=False)
+        self.assertIn("invalid branch type: agent", result.stderr)
+        self.assertEqual(self.git_snapshot(), before)
+
+    def test_prepare_continues_legacy_branch(self):
+        self.save_settings(branch={"mode": "fromBase"})
+        self.git("switch", "-c", "codex/legacy")
+        before = self.git_snapshot()
+        result = self.run_cli("prepare")
+        self.assertIn("branch=codex/legacy created=false", result.stdout)
+        self.assertEqual(self.git_snapshot(), before)
+
     def assert_prepare_explicit_base_starts_from_latest_base(self, sync_mode):
         self.save_settings(sync={"mode": sync_mode, "updateMethod": "ffOnly"})
         self.git("push", "-q", "origin", "main")
@@ -1071,7 +1135,8 @@ class WorkflowTests(unittest.TestCase):
 
     def test_squash_default_unconventional_branch(self):
         self.save_settings(integration={"mergeMethod": "squash"})
-        self.run_cli("prepare", "--branch-name", "work-in-progress")
+        self.git("switch", "-c", "work-in-progress")
+        self.assertIn("created=false", self.run_cli("prepare").stdout)
         self.change()
         self.commit()
         self.change("other")

@@ -4,19 +4,41 @@ ORIGINAL_BRANCH=""
 WORKING_BRANCH=""
 BRANCH_CREATED=false
 
-create_working_branch() {
-  if [[ -z "$BRANCH_NAME" ]]; then
+validate_branch_name() {
+  local branch_name="$1"
+  local branch_type
+
+  if [[ -z "$branch_name" ]]; then
     fail "--branch-name is required by the configured branch mode"
   fi
 
-  if ! git check-ref-format --branch "$BRANCH_NAME" >/dev/null 2>&1; then
-    fail "invalid branch name: $BRANCH_NAME"
+  if ! git check-ref-format --branch "$branch_name" >/dev/null 2>&1; then
+    fail "invalid branch name: $branch_name"
   fi
 
+  if [[ "$branch_name" != */* ]]; then
+    fail "branch name must use <type>/<description>: $branch_name"
+  fi
+
+  branch_type="${branch_name%%/*}"
+  case "$branch_type" in
+    feat|fix|chore|docs|refactor|test|ci|build|perf|style|revert|hotfix)
+      ;;
+    *)
+      fail "invalid branch type: $branch_type"
+      ;;
+  esac
+}
+
+validate_new_branch() {
+  validate_branch_name "$BRANCH_NAME"
   if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
     fail "branch already exists: $BRANCH_NAME"
   fi
+}
 
+create_working_branch() {
+  validate_new_branch
   git checkout -q -b "$BRANCH_NAME"
   BRANCH_CREATED=true
 }

@@ -53,7 +53,7 @@ Read-only tasks do not use workflow commands.
 
 Prepare options:
   --branch-name NAME
-      Candidate branch name when starting from a base.
+      Candidate branch name using <type>/<description> when starting from a base.
 
   --base BRANCH
       Start a new working branch from this configured base. Requires

@@ -82,10 +82,7 @@ prepare_from_base() {
 
   is_base_branch "$PREPARE_BASE" || fail "base is not configured in git.branch.baseBranches: $PREPARE_BASE"
   git show-ref --verify --quiet "refs/heads/$PREPARE_BASE" || fail "local base branch not found: $PREPARE_BASE"
-  git check-ref-format --branch "$BRANCH_NAME" >/dev/null 2>&1 || fail "invalid branch name: $BRANCH_NAME"
-  if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
-    fail "branch already exists: $BRANCH_NAME"
-  fi
+  validate_new_branch
   base_head="$(git rev-parse "$PREPARE_BASE^{commit}")"
 
   create_backup
@@ -150,6 +147,11 @@ prepare() {
     WORKING_BRANCH="$(current_branch)"
     print_prepare_result
     return 0
+  fi
+
+  if [[ "$BRANCH_MODE" == alwaysCreate ]] ||
+      { [[ "$BRANCH_MODE" == fromBase ]] && is_base_branch "$ORIGINAL_BRANCH"; }; then
+    validate_new_branch
   fi
 
   create_backup
