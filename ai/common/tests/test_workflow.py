@@ -119,6 +119,15 @@ class WorkflowTests(unittest.TestCase):
                               env=self.env)
         return local_head, self.git("ls-remote", "--heads", "origin", "main")
 
+    def advance_remote_branch(self, branch):
+        upstream = Path(tempfile.mkdtemp(dir=self.root))
+        subprocess.check_call(["git", "clone", "-q", "-b", branch,
+                               str(self.remote), str(upstream)], env=self.env)
+        (upstream / "remote-note").write_text("remote advance\n")
+        for arguments in (("add", "remote-note"), ("commit", "-qm", "Remote advance"),
+                          ("push", "-q", "origin", branch)):
+            subprocess.check_call(["git", "-C", str(upstream), *arguments], env=self.env)
+
     def existing_branch(self, mode="pullRequest", bases=("main",), branch_mode="current"):
         self.stub_gh()
         self.save_settings(integration={"mode": mode},
@@ -261,7 +270,7 @@ class WorkflowTests(unittest.TestCase):
         help_text = self.run_cli("--help").stdout
         self.assertEqual(set(re.findall(r"^  ([a-z][a-z-]*)$", help_text, re.MULTILINE)),
                          {"prepare", "commit", "restore", "revert", "cherry-pick",
-                          "rebase", "merge", "push", "pr"})
+                          "rebase", "merge", "push", "branch", "pr"})
         for meaning in ("before editing", "after editing", "--message MESSAGE",
                         "-- PATH...", "outside commit", "current branch",
                         "local", "pull request", "--branch-name NAME"):
@@ -273,11 +282,17 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("configured base branch", self.run_cli("merge", ok=False).stderr)
         pr_help = self.run_cli("pr", "--help").stdout
         self.assertEqual(set(re.findall(r"^  ([a-z]+)$", pr_help, re.MULTILINE)), {"submit", "merge"})
+        branch_help = self.run_cli("branch", "--help").stdout
+        self.assertEqual(set(re.findall(r"^  ([a-z]+)$", branch_help, re.MULTILINE)),
+                         {"create", "switch", "rename", "delete"})
+        for action in ("create", "switch", "rename", "delete"):
+            self.assertIn("Usage:", self.run_cli("branch", action, "--help").stdout)
         for command in ("start", "finish", "add", "stash", "pull", "checkout",
-                        "switch", "branch", "reset"):
+                        "switch", "reset"):
             self.assertIn("unknown command", self.run_cli(command, ok=False).stderr)
             self.assertNotIn(f"  git-workflow {command}\n", help_text)
         self.run_cli("pr", "unknown", ok=False)
+        self.run_cli("branch", "unknown", ok=False)
         self.run_cli("pr", "submit", "--title", "No override", ok=False)
 
     def test_disabled_or_unconfigured_project_skips_workflow(self):
@@ -288,6 +303,7 @@ class WorkflowTests(unittest.TestCase):
             ("prepare", ("--branch-name", "feat/test")),
             ("commit", ("--message", "Change", "--all")),
             ("push", ()),
+            ("branch", ("create", "feat/disabled")),
             ("merge", ()),
             ("pr", ("submit",)),
             ("pr", ("merge",)),
@@ -295,12 +311,12 @@ class WorkflowTests(unittest.TestCase):
             result = self.run_cli(action, *arguments)
             self.assertEqual(
                 result.stdout,
-                f"[git] {action + ' ' + arguments[0] if action == 'pr' else action} skip reason=workflow-disabled\n",
+                f"[git] {action + ' ' + arguments[0] if action in ('pr', 'branch') else action} skip reason=workflow-disabled\n",
             )
 
     def test_command_executables(self):
         for action in ("prepare", "commit", "restore", "revert", "cherry-pick",
-                       "rebase", "merge", "push", "pr"):
+                       "rebase", "merge", "push", "branch", "pr"):
             path = COMMON / "libexec/git-workflow" / action
             self.assertTrue(os.access(path, os.X_OK))
             self.assertEqual(path.read_text().splitlines()[0], "#!/usr/bin/env bash")
@@ -341,7 +357,7 @@ class WorkflowTests(unittest.TestCase):
 
         installed = destination / ".local/bin/git-workflow"
         for command in ("prepare", "commit", "restore", "revert", "cherry-pick",
-                        "rebase", "push", "merge", "pr"):
+                        "rebase", "push", "branch", "merge", "pr"):
             self.assertTrue(os.access(destination / ".local/libexec/git-workflow" / command, os.X_OK))
         for command in ("start", "finish"):
             self.assertFalse((destination / ".local/libexec/git-workflow" / command).exists())
@@ -765,6 +781,237 @@ class WorkflowTests(unittest.TestCase):
         before = self.git_snapshot()
         result = self.run_cli("prepare")
         self.assertIn("branch=codex/legacy created=false", result.stdout)
+        self.assertEqual(self.git_snapshot(), before)
+
+    def test_branch_create_switch_and_local_delete(self):
+        head = self.git("rev-parse", "HEAD")
+        result = self.run_cli("branch", "create", "feat/branch-domain")
+        self.assertIn("branch create ok name=feat/branch-domain", result.stdout)
+        self.assertEqual(self.git("branch", "--show-current"), "feat/branch-domain")
+        self.assertEqual(self.git("rev-parse", "HEAD"), head)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/branch-domain"), "")
+        result = self.run_cli("branch", "switch", "main")
+        self.assertIn("branch switch ok name=main", result.stdout)
+        result = self.run_cli("branch", "delete", "feat/branch-domain")
+        self.assertIn("remote=false", result.stdout)
+        self.assertEqual(self.git("branch", "--list", "feat/branch-domain"), "")
+
+    def test_branch_create_rejects_invalid_and_duplicate_without_mutation(self):
+        self.git("branch", "feat/existing")
+        for name, message in (
+            ("codex/agent", "invalid branch type: codex"),
+            ("plain", "branch name must use"),
+            ("feat/foo..bar", "invalid branch name"),
+            ("feat/existing", "branch already exists"),
+        ):
+            with self.subTest(name=name):
+                before = self.git_snapshot()
+                self.assertIn(message, self.run_cli("branch", "create", name, ok=False).stderr)
+                self.assertEqual(self.git_snapshot(), before)
+
+    def test_branch_switch_rejects_dirty_missing_and_detached(self):
+        self.git("branch", "work-in-progress")
+        self.change()
+        before = self.git_snapshot()
+        self.assertIn("working tree has local changes",
+                      self.run_cli("branch", "switch", "work-in-progress", ok=False).stderr)
+        self.assertEqual(self.git_snapshot(), before)
+        self.git("restore", "tracked")
+        before = self.git_snapshot()
+        self.assertIn("local branch not found",
+                      self.run_cli("branch", "switch", "missing", ok=False).stderr)
+        self.assertEqual(self.git_snapshot(), before)
+        self.git("checkout", "--detach", "-q", "HEAD")
+        before = self.git_snapshot()
+        self.assertIn("detached HEAD", self.run_cli("branch", "switch", "main", ok=False).stderr)
+        self.assertEqual(self.git_snapshot(), before)
+
+    def test_branch_rename_local_and_invalid_targets(self):
+        self.git("switch", "-c", "work-in-progress")
+        before = self.git_snapshot()
+        self.assertIn("invalid branch type",
+                      self.run_cli("branch", "rename", "codex/renamed", ok=False).stderr)
+        self.assertEqual(self.git_snapshot(), before)
+        self.git("branch", "feat/existing")
+        before = self.git_snapshot()
+        self.assertIn("branch already exists",
+                      self.run_cli("branch", "rename", "feat/existing", ok=False).stderr)
+        self.assertEqual(self.git_snapshot(), before)
+        result = self.run_cli("branch", "rename", "fix/renamed")
+        self.assertIn("old=work-in-progress new=fix/renamed remote=false", result.stdout)
+        self.assertEqual(self.git("branch", "--show-current"), "fix/renamed")
+        self.assertEqual(self.git("branch", "--list", "work-in-progress"), "")
+
+    def test_branch_rename_rejects_base_and_detached_head(self):
+        before = self.git_snapshot()
+        self.assertIn("configured base branch",
+                      self.run_cli("branch", "rename", "fix/main", ok=False).stderr)
+        self.assertEqual(self.git_snapshot(), before)
+        self.git("checkout", "--detach", "-q", "HEAD")
+        before = self.git_snapshot()
+        self.assertIn("detached HEAD",
+                      self.run_cli("branch", "rename", "fix/detached", ok=False).stderr)
+        self.assertEqual(self.git_snapshot(), before)
+
+    def test_branch_rename_remote_and_open_pr_guard(self):
+        self.stub_gh()
+        self.run_cli("branch", "create", "feat/old-name")
+        self.run_cli("push")
+        before = self.git_snapshot()
+        self.env["GH_EXTRA_PRS"] = '[{"url":"https://example.invalid/pr/2"}]'
+        result = self.run_cli("branch", "rename", "fix/new-name", ok=False)
+        self.assertIn("current branch has an open pull request", result.stderr)
+        self.assertEqual(self.git_snapshot(), before)
+        self.env.pop("GH_EXTRA_PRS")
+        result = self.run_cli("branch", "rename", "fix/new-name")
+        self.assertIn("old=feat/old-name new=fix/new-name remote=true", result.stdout)
+        self.assertEqual(self.git("branch", "--show-current"), "fix/new-name")
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"),
+                         "origin/fix/new-name")
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/old-name"), "")
+        self.assertTrue(self.git("ls-remote", "--heads", "origin", "fix/new-name"))
+
+    def test_remote_branch_operations_require_pr_verification(self):
+        self.run_cli("branch", "create", "feat/old-name")
+        self.run_cli("push")
+        before = self.git_snapshot()
+        self.assertIn("cannot verify open pull requests",
+                      self.run_cli("branch", "rename", "fix/new-name", ok=False).stderr)
+        self.assertEqual(self.git_snapshot(), before)
+        self.run_cli("branch", "switch", "main")
+        before = self.git_snapshot()
+        self.assertIn("cannot verify open pull requests",
+                      self.run_cli("branch", "delete", "feat/old-name", "--remote", ok=False).stderr)
+        self.assertEqual(self.git_snapshot(), before)
+
+    def test_branch_rename_remote_push_failure_restores_local_name(self):
+        self.stub_gh()
+        self.run_cli("branch", "create", "feat/old-name")
+        self.run_cli("push")
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            'if [[ "$1" == push && "$2" == --quiet && "$3" == --set-upstream ]]; then exit 1; fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        git_stub.chmod(0o755)
+        before = self.git_snapshot()
+        result = self.run_cli("branch", "rename", "fix/new-name", ok=False)
+        self.assertIn("original branch restored", result.stderr)
+        self.assertEqual(self.git_snapshot(), before)
+
+    def test_branch_rename_rejects_remote_ahead(self):
+        self.stub_gh()
+        self.run_cli("branch", "create", "feat/old-name")
+        self.run_cli("push")
+        self.advance_remote_branch("feat/old-name")
+        before = self.git_snapshot()
+        self.assertIn("remote branch has commits absent from local history",
+                      self.run_cli("branch", "rename", "fix/new-name", ok=False).stderr)
+        self.assertEqual(self.git_snapshot(), before)
+
+    def test_branch_rename_rejects_remote_copy_without_upstream(self):
+        self.run_cli("branch", "create", "feat/old-name")
+        self.git("push", "origin", "feat/old-name")
+        before = self.git_snapshot()
+        self.assertIn("remote branch exists without an upstream",
+                      self.run_cli("branch", "rename", "fix/new-name", ok=False).stderr)
+        self.assertEqual(self.git_snapshot(), before)
+
+    def test_branch_rename_old_remote_deletion_failure_is_partial(self):
+        self.stub_gh()
+        self.run_cli("branch", "create", "feat/old-name")
+        self.run_cli("push")
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            'if [[ "$1" == push && "$3" == --force-with-lease=* ]]; then exit 1; fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        git_stub.chmod(0o755)
+        result = self.run_cli("branch", "rename", "fix/new-name", ok=False)
+        self.assertIn("remote rename partial", result.stderr)
+        self.assertEqual(self.git("branch", "--show-current"), "fix/new-name")
+        self.assertTrue(self.git("ls-remote", "--heads", "origin", "feat/old-name"))
+        self.assertTrue(self.git("ls-remote", "--heads", "origin", "fix/new-name"))
+
+    def test_branch_delete_guards_and_remote_behavior(self):
+        self.stub_gh()
+        self.run_cli("branch", "create", "feat/old-name")
+        self.run_cli("push")
+        for name, message in (("main", "configured base branch"),
+                              ("feat/old-name", "current branch"),
+                              ("missing", "local branch not found")):
+            before = self.git_snapshot()
+            self.assertIn(message, self.run_cli("branch", "delete", name, ok=False).stderr)
+            self.assertEqual(self.git_snapshot(), before)
+        self.run_cli("branch", "switch", "main")
+        before = self.git_snapshot()
+        self.env["GH_EXTRA_PRS"] = '[{"url":"https://example.invalid/pr/2"}]'
+        self.assertIn("current branch has an open pull request",
+                      self.run_cli("branch", "delete", "feat/old-name", "--remote", ok=False).stderr)
+        self.assertEqual(self.git_snapshot(), before)
+        self.env.pop("GH_EXTRA_PRS")
+        result = self.run_cli("branch", "delete", "feat/old-name", "--remote")
+        self.assertIn("remote=deleted", result.stdout)
+        self.assertEqual(self.git("branch", "--list", "feat/old-name"), "")
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/old-name"), "")
+
+    def test_branch_delete_local_only_preserves_remote(self):
+        self.run_cli("branch", "create", "feat/old-name")
+        self.run_cli("push")
+        self.run_cli("branch", "switch", "main")
+        self.assertIn("remote=false",
+                      self.run_cli("branch", "delete", "feat/old-name").stdout)
+        self.assertTrue(self.git("ls-remote", "--heads", "origin", "feat/old-name"))
+
+    def test_branch_delete_missing_remote_and_partial_failure(self):
+        self.stub_gh()
+        self.run_cli("branch", "create", "feat/old-name")
+        self.run_cli("branch", "switch", "main")
+        self.assertIn("remote=already-missing",
+                      self.run_cli("branch", "delete", "feat/old-name", "--remote").stdout)
+        self.run_cli("branch", "create", "feat/old-name")
+        self.run_cli("push")
+        self.run_cli("branch", "switch", "main")
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            'if [[ "$1" == push && "$3" == --force-with-lease=* ]]; then exit 1; fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        git_stub.chmod(0o755)
+        result = self.run_cli("branch", "delete", "feat/old-name", "--remote", ok=False)
+        self.assertIn("local branch deleted but remote deletion failed", result.stderr)
+        self.assertEqual(self.git("branch", "--list", "feat/old-name"), "")
+        self.assertTrue(self.git("ls-remote", "--heads", "origin", "feat/old-name"))
+
+    def test_branch_delete_rejects_ambiguous_remote(self):
+        self.run_cli("branch", "create", "feat/old-name")
+        self.run_cli("branch", "switch", "main")
+        self.git("remote", "add", "mirror", str(self.remote))
+        before = self.git_snapshot()
+        self.assertIn("ambiguous remote",
+                      self.run_cli("branch", "delete", "feat/old-name", "--remote", ok=False).stderr)
+        self.assertEqual(self.git_snapshot(), before)
+
+    def test_branch_delete_remote_rejects_remote_ahead(self):
+        self.stub_gh()
+        self.run_cli("branch", "create", "feat/old-name")
+        self.run_cli("push")
+        self.run_cli("branch", "switch", "main")
+        self.advance_remote_branch("feat/old-name")
+        before = self.git_snapshot()
+        self.assertIn("remote branch has commits absent from local history",
+                      self.run_cli("branch", "delete", "feat/old-name", "--remote", ok=False).stderr)
+        self.assertEqual(self.git_snapshot(), before)
+
+    def test_branch_delete_rejects_unmerged_branch(self):
+        self.run_cli("branch", "create", "feat/unmerged")
+        self.change()
+        self.git("add", "tracked")
+        self.git("commit", "-qm", "Unmerged")
+        self.run_cli("branch", "switch", "main")
+        before = self.git_snapshot()
+        self.assertIn("not fully merged",
+                      self.run_cli("branch", "delete", "feat/unmerged", ok=False).stderr)
         self.assertEqual(self.git_snapshot(), before)
 
     def assert_prepare_explicit_base_starts_from_latest_base(self, sync_mode):
