@@ -871,17 +871,12 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/old-name"), "")
         self.assertTrue(self.git("ls-remote", "--heads", "origin", "fix/new-name"))
 
-    def test_remote_branch_operations_require_pr_verification(self):
+    def test_branch_rename_requires_pr_verification(self):
         self.run_cli("branch", "create", "feat/old-name")
         self.run_cli("push")
         before = self.git_snapshot()
         self.assertIn("cannot verify open pull requests",
                       self.run_cli("branch", "rename", "fix/new-name", ok=False).stderr)
-        self.assertEqual(self.git_snapshot(), before)
-        self.run_cli("branch", "switch", "main")
-        before = self.git_snapshot()
-        self.assertIn("cannot verify open pull requests",
-                      self.run_cli("branch", "delete", "feat/old-name", "--remote", ok=False).stderr)
         self.assertEqual(self.git_snapshot(), before)
 
     def test_branch_rename_remote_push_failure_restores_local_name(self):
@@ -941,19 +936,36 @@ class WorkflowTests(unittest.TestCase):
                               ("feat/old-name", "current branch"),
                               ("missing", "local branch not found")):
             before = self.git_snapshot()
-            self.assertIn(message, self.run_cli("branch", "delete", name, ok=False).stderr)
+            self.assertIn(message, self.run_cli("branch", "delete", name, "--remote", ok=False).stderr)
             self.assertEqual(self.git_snapshot(), before)
         self.run_cli("branch", "switch", "main")
-        before = self.git_snapshot()
         self.env["GH_EXTRA_PRS"] = '[{"url":"https://example.invalid/pr/2"}]'
-        self.assertIn("current branch has an open pull request",
-                      self.run_cli("branch", "delete", "feat/old-name", "--remote", ok=False).stderr)
-        self.assertEqual(self.git_snapshot(), before)
-        self.env.pop("GH_EXTRA_PRS")
         result = self.run_cli("branch", "delete", "feat/old-name", "--remote")
         self.assertIn("remote=deleted", result.stdout)
         self.assertEqual(self.git("branch", "--list", "feat/old-name"), "")
         self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/old-name"), "")
+        self.assertEqual(self.gh_calls(), [])
+
+    def test_branch_delete_remote_without_usable_gh(self):
+        self.run_cli("branch", "create", "feat/provider-independent")
+        self.run_cli("push")
+        self.run_cli("branch", "switch", "main")
+        result = self.run_cli("branch", "delete", "feat/provider-independent", "--remote")
+        self.assertIn("remote=deleted", result.stdout)
+        self.assertEqual(self.git("branch", "--list", "feat/provider-independent"), "")
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/provider-independent"), "")
+
+    def test_branch_delete_remote_never_invokes_failing_gh(self):
+        gh_stub = self.bin / "gh"
+        gh_marker = self.root / "gh-called"
+        gh_stub.write_text(f'#!/usr/bin/env bash\nprintf called > "{gh_marker}"\nexit 1\n')
+        gh_stub.chmod(0o755)
+        self.run_cli("branch", "create", "feat/old-name")
+        self.run_cli("push")
+        self.run_cli("branch", "switch", "main")
+        self.assertIn("remote=deleted",
+                      self.run_cli("branch", "delete", "feat/old-name", "--remote").stdout)
+        self.assertFalse(gh_marker.exists())
 
     def test_branch_delete_local_only_preserves_remote(self):
         self.run_cli("branch", "create", "feat/old-name")
@@ -993,7 +1005,6 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.git_snapshot(), before)
 
     def test_branch_delete_remote_rejects_remote_ahead(self):
-        self.stub_gh()
         self.run_cli("branch", "create", "feat/old-name")
         self.run_cli("push")
         self.run_cli("branch", "switch", "main")
@@ -1001,6 +1012,18 @@ class WorkflowTests(unittest.TestCase):
         before = self.git_snapshot()
         self.assertIn("remote branch has commits absent from local history",
                       self.run_cli("branch", "delete", "feat/old-name", "--remote", ok=False).stderr)
+        self.assertEqual(self.git_snapshot(), before)
+
+    def test_branch_delete_remote_rejects_unmerged_local_branch(self):
+        self.run_cli("branch", "create", "feat/unmerged")
+        self.run_cli("push")
+        self.change()
+        self.git("add", "tracked")
+        self.git("commit", "-qm", "Unmerged")
+        self.run_cli("branch", "switch", "main")
+        before = self.git_snapshot()
+        self.assertIn("not fully merged",
+                      self.run_cli("branch", "delete", "feat/unmerged", "--remote", ok=False).stderr)
         self.assertEqual(self.git_snapshot(), before)
 
     def test_branch_delete_rejects_unmerged_branch(self):

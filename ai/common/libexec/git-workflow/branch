@@ -77,7 +77,6 @@ case "$BRANCH_ACTION" in
         if [[ -n "$remote_sha" ]]; then
           git merge-base --is-ancestor "$remote_sha" "$BRANCH_TARGET" ||
             fail "remote branch has commits absent from local history: $remote/$BRANCH_TARGET"
-          branch_has_open_pr "$BRANCH_TARGET"
         fi
       fi
       remote_state=already-missing

@@ -151,7 +151,8 @@ Actions:
       Safely delete a merged local branch. --remote also deletes its remote branch.
 
 New names use <type>/<description>. Existing branch names may be used for
-switch and delete. Remote operations stop when an open PR cannot be ruled out.
+switch and delete. Remote rename checks for open GitHub pull requests.
+Explicit remote deletion uses Git only.
 EOF2
 }
 
