@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/branch.sh"
+
+case "${1:-}" in
+  -h|--help) branch_usage; exit 0 ;;
+  create|switch|rename|delete) BRANCH_ACTION="$1"; shift ;;
+  "") branch_usage >&2; exit 1 ;;
+  *) CURRENT_ACTION="branch"; fail "unknown branch action: $1" ;;
+esac
+CURRENT_ACTION="branch $BRANCH_ACTION"
+
+if [[ "${1:-}" == -h || "${1:-}" == --help ]] && [[ $# -eq 1 ]]; then
+  branch_usage
+  exit 0
+fi
+
+DELETE_REMOTE=false
+if [[ "$BRANCH_ACTION" == delete ]]; then
+  [[ $# -ge 1 && $# -le 2 ]] || fail "usage: git-workflow branch delete <name> [--remote]"
+  BRANCH_TARGET="$1"
+  if [[ $# -eq 2 ]]; then
+    [[ "$2" == --remote ]] || fail "unknown branch delete option: $2"
+    DELETE_REMOTE=true
+  fi
+else
+  [[ $# -eq 1 && -n "$1" && "$1" != -* ]] ||
+    fail "usage: git-workflow branch $BRANCH_ACTION <name>"
+  BRANCH_TARGET="$1"
+fi
+[[ -n "$BRANCH_TARGET" && "$BRANCH_TARGET" != -* ]] || fail "invalid branch target"
+
+preflight_core
+require_repository
+if ! project_workflow_enabled; then
+  printf '[git] branch %s skip reason=workflow-disabled\n' "$BRANCH_ACTION"
+  exit 0
+fi
+
+BASE_BRANCHES_JSON="$(setting git.branch.baseBranches)"
+
+case "$BRANCH_ACTION" in
+  create)
+    validate_new_branch "$BRANCH_TARGET"
+    is_base_branch "$BRANCH_TARGET" && fail "cannot create a configured base branch: $BRANCH_TARGET"
+    branch_create "$BRANCH_TARGET"
+    printf '[git] branch create ok name=%s\n' "$BRANCH_TARGET"
+    ;;
+  switch)
+    current_branch >/dev/null
+    has_local_changes && fail "working tree has local changes"
+    branch_switch "$BRANCH_TARGET"
+    printf '[git] branch switch ok name=%s\n' "$BRANCH_TARGET"
+    ;;
+  rename)
+    old_name="$(current_branch)"
+    is_base_branch "$old_name" && fail "cannot rename a configured base branch: $old_name"
+    validate_new_branch "$BRANCH_TARGET"
+    is_base_branch "$BRANCH_TARGET" && fail "cannot rename to a configured base branch: $BRANCH_TARGET"
+    branch_rename "$old_name" "$BRANCH_TARGET"
+    printf '[git] branch rename ok old=%s new=%s remote=%s\n' \
+      "$old_name" "$BRANCH_TARGET" "$BRANCH_RENAME_REMOTE"
+    ;;
+  delete)
+    is_base_branch "$BRANCH_TARGET" && fail "cannot delete a configured base branch: $BRANCH_TARGET"
+    branch_exists_local "$BRANCH_TARGET" || fail "local branch not found: $BRANCH_TARGET"
+    [[ "$(current_branch)" != "$BRANCH_TARGET" ]] || fail "cannot delete the current branch: $BRANCH_TARGET"
+    remote_state=false
+    if [[ "$DELETE_REMOTE" == true ]]; then
+      remote="$(branch_remote_for_delete "$BRANCH_TARGET")"
+      remote_sha=""
+      if [[ -n "$remote" ]]; then
+        remote_sha="$(branch_remote_sha "$remote" "$BRANCH_TARGET")"
+        if [[ -n "$remote_sha" ]]; then
+          git merge-base --is-ancestor "$remote_sha" "$BRANCH_TARGET" ||
+            fail "remote branch has commits absent from local history: $remote/$BRANCH_TARGET"
+        fi
+      fi
+      remote_state=already-missing
+    fi
+    branch_delete_local "$BRANCH_TARGET"
+    if [[ "$DELETE_REMOTE" == true && -n "$remote_sha" ]]; then
+      branch_delete_remote "$remote" "$BRANCH_TARGET" "$remote_sha" ||
+        fail "local branch deleted but remote deletion failed: $remote/$BRANCH_TARGET"
+      remote_sha="$(branch_remote_sha "$remote" "$BRANCH_TARGET")" ||
+        fail "local branch deleted but remote state could not be verified: $remote/$BRANCH_TARGET"
+      [[ -z "$remote_sha" ]] ||
+        fail "local branch deleted but remote branch remains: $remote/$BRANCH_TARGET"
+      remote_state=deleted
+    fi
+    branch_exists_local "$BRANCH_TARGET" && fail "local branch deletion verification failed: $BRANCH_TARGET"
+    printf '[git] branch delete ok name=%s remote=%s\n' "$BRANCH_TARGET" "$remote_state"
+    ;;
+esac

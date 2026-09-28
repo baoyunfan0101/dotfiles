@@ -10,7 +10,7 @@ done
 WORKFLOW_ROOT="$(cd -P "$(dirname "$WORKFLOW_SOURCE")/.." && pwd)"
 
 case "${1:-}" in
-  prepare|commit|restore|revert|cherry-pick|rebase|push|merge|pr)
+  prepare|commit|restore|revert|cherry-pick|rebase|push|branch|merge|pr)
     action="$1"
     shift
     exec "$WORKFLOW_ROOT/libexec/git-workflow/$action" "$@"

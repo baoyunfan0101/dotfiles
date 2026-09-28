@@ -12,6 +12,10 @@ Usage:
   git-workflow cherry-pick COMMIT
   git-workflow rebase [--base BRANCH]
   git-workflow push [--override-manual]
+  git-workflow branch create <name>
+  git-workflow branch switch <name>
+  git-workflow branch rename <new-name>
+  git-workflow branch delete <name> [--remote]
   git-workflow merge [--base BRANCH] [--message MESSAGE]
   git-workflow pr submit [--base BRANCH]
   git-workflow pr merge [--base BRANCH]
@@ -41,6 +45,10 @@ Commands:
       Auxiliary operation for an explicitly needed push outside commit: push
       the current branch according to project settings.
 
+  branch
+      Create, switch, rename, or safely delete branches. See git-workflow
+      branch --help.
+
   merge
       Integrate the current branch locally only with explicit user
       authorization. Requires localMerge mode.
@@ -53,7 +61,7 @@ Read-only tasks do not use workflow commands.
 
 Prepare options:
   --branch-name NAME
-      Candidate branch name when starting from a base.
+      Candidate branch name using <type>/<description> when starting from a base.
 
   --base BRANCH
       Start a new working branch from this configured base. Requires
@@ -121,6 +129,30 @@ Commands:
 PR submission, CI success, and task completion do not authorize merging.
 Base: --base, then an existing PR, then the sole configured base.
 Ambiguous bases require --base. Configured base branches cannot be delivered.
+EOF2
+}
+
+branch_usage() {
+  cat <<EOF2
+Usage:
+  git-workflow branch create <name>
+  git-workflow branch switch <name>
+  git-workflow branch rename <new-name>
+  git-workflow branch delete <name> [--remote]
+
+Actions:
+  create
+      Create and switch to a new branch from HEAD.
+  switch
+      Switch to an existing local branch with a clean working tree.
+  rename
+      Rename the current branch and migrate its upstream when present.
+  delete
+      Safely delete a merged local branch. --remote also deletes its remote branch.
+
+New names use <type>/<description>. Existing branch names may be used for
+switch and delete. Remote rename checks for open GitHub pull requests.
+Explicit remote deletion uses Git only.
 EOF2
 }
 

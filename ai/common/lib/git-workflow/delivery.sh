@@ -6,6 +6,8 @@ PR_BODY=""
 INTEGRATION_BRANCH_DELETED=false
 DELIVERY_BASE=""
 
+source "$WORKFLOW_ROOT/lib/git-workflow/branch.sh"
+
 parse_delivery_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -45,19 +47,24 @@ delete_delivered_branch() {
   local working_branch="$1"
   local base_branch="$2"
   local remote
+  local remote_sha
   local remote_deleted=false
 
   remote="$(remote_for_branch "$working_branch" "$base_branch")"
 
-  if git ls-remote --exit-code --heads "$remote" "$working_branch" >/dev/null 2>&1; then
-    git push --quiet "$remote" --delete "$working_branch"
+  remote_sha="$(branch_remote_sha "$remote" "$working_branch")"
+  if [[ -n "$remote_sha" ]]; then
+    [[ "$remote_sha" == "$(git rev-parse "$working_branch")" ]] ||
+      fail "remote working branch changed after integration: $remote/$working_branch"
+    branch_delete_remote "$remote" "$working_branch" "$remote_sha" ||
+      fail "remote branch deletion failed: $remote/$working_branch"
     remote_deleted=true
   fi
 
   if [[ "$INTEGRATION_MERGE_METHOD" == "squash" ]]; then
-    git branch -D "$working_branch" >/dev/null
+    branch_delete_local "$working_branch" true
   else
-    git branch -d "$working_branch" >/dev/null
+    branch_delete_local "$working_branch"
   fi
 
   if [[ "$remote_deleted" == true ]]; then
