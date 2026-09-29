@@ -13,7 +13,14 @@ preflight_command() {
 preflight_core() {
   preflight_command git core "install git and ensure it is on PATH"
   preflight_command python3 core "install python3 and ensure it is on PATH"
-  preflight_command agent-project core "re-run the dotfiles AI installer"
+  if command -v agent-project >/dev/null 2>&1; then
+    AGENT_PROJECT_COMMAND=agent-project
+  elif [[ -x "$WORKFLOW_ROOT/bin/agent-project" ]]; then
+    AGENT_PROJECT_COMMAND="$WORKFLOW_ROOT/bin/agent-project"
+  else
+    preflight_error agent-project "command not found" core \
+      "re-run the dotfiles AI installer"
+  fi
 }
 
 project_workflow_enabled() {

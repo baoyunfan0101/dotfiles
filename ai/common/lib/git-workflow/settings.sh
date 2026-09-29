@@ -19,7 +19,7 @@ PY
 }
 
 setting() {
-  agent-project get "$1"
+  "$AGENT_PROJECT_COMMAND" get "$1"
 }
 
 load_prepare_settings() {
