@@ -16,8 +16,9 @@
       "mode": "automatic"
     },
     "branch": {
-      "mode": "fromBase",
-      "baseBranches": ["main"],
+      "baseBranches": [
+        "main"
+      ],
       "deleteAfterIntegration": false
     },
     "integration": {

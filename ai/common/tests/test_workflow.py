@@ -68,7 +68,7 @@ class WorkflowTests(unittest.TestCase):
         return result
 
     def prepare(self):
-        return self.run_cli("prepare", "--branch-name", "feat/test")
+        return self.run_cli("prepare", "--base", "main", "--branch-name", "feat/test")
 
     def change(self, name="tracked"):
         (self.repo / name).write_text("changed\n")
@@ -128,10 +128,9 @@ class WorkflowTests(unittest.TestCase):
                           ("push", "-q", "origin", branch)):
             subprocess.check_call(["git", "-C", str(upstream), *arguments], env=self.env)
 
-    def existing_branch(self, mode="pullRequest", bases=("main",), branch_mode="current"):
+    def existing_branch(self, mode="pullRequest", bases=("main",)):
         self.stub_gh()
-        self.save_settings(integration={"mode": mode},
-                           branch={"mode": branch_mode, "baseBranches": list(bases)})
+        self.save_settings(integration={"mode": mode}, branch={"baseBranches": list(bases)})
         self.git("push", "-q", "origin", "main")
         for base in bases:
             if base != "main":
@@ -151,11 +150,6 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(json.loads(Path(self.env["GH_STATE"]).read_text())["base"], "main")
         self.run_cli("pr", "merge")
         self.assertEqual(self.git("branch", "--show-current"), "main")
-
-    def test_existing_from_base_branch_is_reused(self):
-        self.existing_branch(branch_mode="fromBase")
-        self.run_cli("pr", "submit")
-        self.assertEqual(self.git("branch", "--show-current"), "fix/manual")
 
     def test_current_branch_local_delivery(self):
         self.existing_branch(mode="localMerge")
@@ -300,7 +294,7 @@ class WorkflowTests(unittest.TestCase):
         path.unlink()
 
         for action, arguments in (
-            ("prepare", ("--branch-name", "feat/test")),
+            ("prepare", ("--base", "main", "--branch-name", "feat/test")),
             ("commit", ("--message", "Change", "--all")),
             ("push", ()),
             ("branch", ("create", "feat/disabled")),
@@ -363,7 +357,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertFalse((destination / ".local/libexec/git-workflow" / command).exists())
         for action in ("submit", "merge"):
             self.assertIn("Usage:", self.run_cli("pr", action, "--help", executable=installed).stdout)
-        self.assertIn("[git] prepare ok", self.run_cli("prepare", "--branch-name", "feat/test", executable=installed).stdout)
+        self.assertIn("[git] prepare ok", self.run_cli("prepare", "--base", "main", "--branch-name", "feat/test", executable=installed).stdout)
         for action in ("connect", "reconnect", "disconnect"):
             self.assertIn("Usage:", self.run_cli("remote", action, "--help", executable=installed).stdout)
         self.run_cli("remote", "disconnect", executable=installed)
@@ -510,6 +504,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_manual_commit_and_push(self):
         self.save_settings(commit={"mode": "manual"})
+        self.git("push", "-q", "origin", "main")
         self.prepare()
         self.change()
         before = self.git("rev-parse", "HEAD")
@@ -699,12 +694,14 @@ class WorkflowTests(unittest.TestCase):
         for method in ("stash", "commit"):
             for mode in ("none", "tracked", "untracked", "all"):
                 with self.subTest(method=method, mode=mode):
-                    self.save_settings(backup={"mode": mode, "method": method}, branch={"mode": "current"})
+                    self.save_settings(backup={"mode": mode, "method": method})
+                    self.git("push", "-q", "origin", "main")
                     self.change()
                     self.git("add", "tracked")
                     self.change("other")
                     status = self.git("status", "--porcelain")
-                    result = self.prepare()
+                    branch = f"feat/backup-{mode}-{method}"
+                    result = self.run_cli("prepare", "--base", "main", "--branch-name", branch)
                     self.assertIn(f"backup={method if mode != 'none' else 'none'}", result.stdout)
                     self.assertEqual(self.git("status", "--porcelain"), status)
                     self.assertEqual((self.repo / "tracked").read_text(), "changed\n")
@@ -714,31 +711,21 @@ class WorkflowTests(unittest.TestCase):
                         self.assertTrue(self.git("for-each-ref", "--format=%(refname)", refs))
                     self.git("restore", "--staged", "--worktree", "tracked")
                     (self.repo / "other").unlink()
-
-    def test_prepare_branch_modes(self):
-        self.save_settings(branch={"mode": "current"})
-        self.assertIn("created=false", self.prepare().stdout)
-        self.assertEqual(self.git("branch", "--show-current"), "main")
-        self.save_settings(branch={"mode": "alwaysCreate"})
-        self.assertIn("created=true", self.prepare().stdout)
-        self.save_settings(branch={"mode": "fromBase"})
-        self.assertIn("created=false", self.run_cli("prepare", "--continue").stdout)
+                    self.git("switch", "main")
 
     def test_prepare_accepts_allowed_branch_types(self):
-        self.save_settings(branch={"mode": "alwaysCreate"})
         for branch_type in ("feat", "fix", "chore", "docs", "refactor", "test",
                             "ci", "build", "perf", "style", "revert", "hotfix"):
             with self.subTest(branch_type=branch_type):
                 branch = f"{branch_type}/branch-validation"
-                result = self.run_cli("prepare", "--branch-name", branch)
+                result = self.run_cli("prepare", "--base", "main", "--branch-name", branch)
                 self.assertIn(f"branch={branch} created=true", result.stdout)
                 self.git("switch", "main")
 
     def test_prepare_rejects_invalid_branch_names_without_mutation(self):
-        self.save_settings(branch={"mode": "alwaysCreate"})
         self.git("branch", "feat/existing")
         for branch, message in (
-            ("", "--branch-name is required by the configured branch mode"),
+            ("", "--branch-name is required"),
             ("codex/delete-session", "invalid branch type: codex"),
             ("claude/delete-session", "invalid branch type: claude"),
             ("agent/delete-session", "invalid branch type: agent"),
@@ -749,39 +736,29 @@ class WorkflowTests(unittest.TestCase):
         ):
             with self.subTest(branch=branch):
                 before = self.git_snapshot()
-                result = self.run_cli("prepare", "--branch-name", branch, ok=False)
+                result = self.run_cli("prepare", "--base", "main", "--branch-name", branch, ok=False)
                 self.assertIn(message, result.stderr)
                 self.assertEqual(self.git_snapshot(), before)
 
     def test_prepare_rejects_invalid_branch_before_backup_or_sync(self):
-        self.save_settings(branch={"mode": "alwaysCreate"},
-                           backup={"mode": "tracked", "method": "commit"},
+        self.save_settings(backup={"mode": "tracked", "method": "commit"},
                            sync={"mode": "fetch"})
         self.change()
         before = self.git_snapshot()
-        result = self.run_cli("prepare", "--branch-name", "codex/invalid", ok=False)
+        result = self.run_cli("prepare", "--base", "main", "--branch-name", "codex/invalid", ok=False)
         self.assertIn("invalid branch type: codex", result.stderr)
         self.assertEqual(self.git_snapshot(), before)
         self.assertEqual(self.git("for-each-ref", "--format=%(refname)",
                                   "refs/agent-workflow/backups/"), "")
 
     def test_prepare_explicit_base_rejects_invalid_branch_without_mutation(self):
-        self.save_settings(branch={"mode": "current"})
         before = self.git_snapshot()
         result = self.run_cli("prepare", "--base", "main", "--branch-name",
                               "codex/invalid", ok=False)
         self.assertIn("invalid branch type: codex", result.stderr)
         self.assertEqual(self.git_snapshot(), before)
 
-    def test_prepare_from_base_mode_rejects_invalid_branch_without_mutation(self):
-        self.save_settings(branch={"mode": "fromBase"})
-        before = self.git_snapshot()
-        result = self.run_cli("prepare", "--branch-name", "agent/invalid", ok=False)
-        self.assertIn("invalid branch type: agent", result.stderr)
-        self.assertEqual(self.git_snapshot(), before)
-
-    def test_prepare_explicitly_continues_legacy_branch(self):
-        self.save_settings(branch={"mode": "fromBase"})
+    def test_prepare_explicitly_continues_existing_branch(self):
         self.git("switch", "-c", "codex/legacy")
         before = self.git_snapshot()
         result = self.run_cli("prepare", "--continue")
@@ -793,15 +770,31 @@ class WorkflowTests(unittest.TestCase):
         self.change()
         self.commit()
         old_head = self.git("rev-parse", "HEAD")
-        for args in ((), ("--branch-name", "feat/next")):
+        for args in ((), ("--branch-name", "feat/next"), ("--base", "main"),
+                     ("--continue", "--branch-name", "feat/next"),
+                     ("--continue", "--base", "main")):
             with self.subTest(args=args):
                 before = self.git_snapshot()
                 result = self.run_cli("prepare", *args, ok=False)
-                self.assertIn("working branch requires --continue", result.stderr)
+                self.assertIn("[git] prepare error", result.stderr)
                 self.assertEqual(self.git_snapshot(), before)
         self.run_cli("prepare", "--base", "main", "--branch-name", "feat/next")
         self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "main"))
         self.assertEqual(self.git("rev-parse", "feat/test"), old_head)
+
+    def test_prepare_requires_one_complete_operation_before_mutation(self):
+        for arguments in ((), ("--branch-name", "feat/next"),
+                          ("--base", "main"),
+                          ("--continue", "--branch-name", "feat/next"),
+                          ("--continue", "--base", "main"),
+                          ("--continue", "--branch-name", "")):
+            with self.subTest(arguments=arguments):
+                before = self.git_snapshot()
+                self.assertIn("[git] prepare error",
+                              self.run_cli("prepare", *arguments, ok=False).stderr)
+                self.assertEqual(self.git_snapshot(), before)
+        self.assertIn("--continue requires a working branch",
+                      self.run_cli("prepare", "--continue", ok=False).stderr)
 
     def test_prepare_new_task_ignores_pr_state(self):
         self.save_settings(integration={"mode": "pullRequest"})
@@ -832,6 +825,7 @@ class WorkflowTests(unittest.TestCase):
     def test_prepare_explicitly_continues_open_pr(self):
         self.stub_gh()
         self.save_settings(integration={"mode": "pullRequest"})
+        self.git("push", "-q", "origin", "main")
         self.prepare()
         self.change()
         self.commit()
@@ -845,6 +839,25 @@ class WorkflowTests(unittest.TestCase):
                       self.git("ls-remote", "--heads", "origin", "feat/test"))
         self.run_cli("pr", "submit")
         self.assertEqual(sum(call[:2] == ["pr", "create"] for call in self.gh_calls()), 1)
+
+    def test_prepare_continuation_does_not_inspect_pr_state(self):
+        self.stub_gh()
+        self.save_settings(integration={"mode": "pullRequest"})
+        self.git("push", "-q", "origin", "main")
+        for state in ("none", "OPEN", "CLOSED", "MERGED"):
+            with self.subTest(state=state):
+                self.git("switch", "main")
+                branch = f"feat/continue-{state.lower()}"
+                self.run_cli("prepare", "--base", "main", "--branch-name", branch)
+                self.change()
+                self.commit()
+                state_path = Path(self.env["GH_STATE"])
+                state_path.write_text(json.dumps({"state": state, "head": branch,
+                                                  "base": "main", "url": "https://example.invalid/pr/1"}))
+                gh_before = self.gh_calls()
+                result = self.run_cli("prepare", "--continue")
+                self.assertIn(f"branch={branch} created=false", result.stdout)
+                self.assertEqual(self.gh_calls(), gh_before)
 
     def test_remote_help_and_invalid_actions(self):
         help_text = self.run_cli("--help").stdout
@@ -1327,99 +1340,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.git("branch", "--list", "feat/next"), "")
         self.assert_no_in_progress_git_operation()
 
-    def test_sync_modes_and_update_methods(self):
-        for mode, method in (("none", "ffOnly"), ("fetch", "ffOnly"),
-                             ("update", "ffOnly"), ("update", "rebase"), ("update", "merge")):
-            with self.subTest(mode=mode, method=method):
-                self.save_settings(sync={"mode": mode, "updateMethod": method}, branch={"mode": "current"})
-                self.git("push", "-q", "origin", "main")
-                old = self.git("rev-parse", "HEAD")
-                tree = self.git("rev-parse", "HEAD^{tree}")
-                remote_tip = self.git("--git-dir", str(self.remote), "commit-tree", tree, "-p", old, "-m", "Remote change")
-                self.git("--git-dir", str(self.remote), "update-ref", "refs/heads/main", remote_tip)
-                result = self.prepare()
-                self.assertIn(f"sync={dict(none='skipped', fetch='fetched', update='updated')[mode]}", result.stdout)
-                self.assertEqual(self.git("rev-parse", "HEAD"), remote_tip if mode == "update" else old)
-                if mode != "none":
-                    self.assertEqual(self.git("rev-parse", "origin/main"), remote_tip)
-                self.git("fetch", "-q", "origin")
-                self.git("merge", "--ff-only", remote_tip)
-
-    def test_conflicting_sync_restores_original_head(self):
-        for method in ("rebase", "merge"):
-            with self.subTest(method=method):
-                self.save_settings(sync={"mode": "update", "updateMethod": method},
-                                   backup={"mode": "none"}, branch={"mode": "current"})
-                self.git("push", "-q", "origin", "main")
-                local_head, remote_head = self.diverge_main_with_conflict()
-
-                result = self.run_cli("prepare", ok=False)
-                self.assertIn("sync failed", result.stderr)
-                self.assertEqual(self.git("branch", "--show-current"), "main")
-                self.assertEqual(self.git("rev-parse", "HEAD"), local_head)
-                self.assertEqual(self.git("ls-remote", "--heads", "origin", "main"), remote_head)
-                self.assertEqual(self.git("status", "--porcelain"), "")
-                self.assert_no_in_progress_git_operation()
-                self.git("reset", "--hard", "-q", "origin/main")
-
-    def test_prepare_sync_conflict_reapplies_protected_changes(self):
-        for update_method in ("ffOnly", "rebase", "merge"):
-            for backup_method in ("stash", "commit"):
-                with self.subTest(update_method=update_method, backup_method=backup_method):
-                    self.save_settings(sync={"mode": "update", "updateMethod": update_method},
-                                       backup={"mode": "all", "method": backup_method},
-                                       branch={"mode": "current"})
-                    if not (self.repo / "staged").exists():
-                        (self.repo / "staged").write_text("original staged\n")
-                        (self.repo / "unstaged").write_text("original unstaged\n")
-                        self.git("add", "staged", "unstaged")
-                        self.git("commit", "-qm", "Add change targets")
-                    self.git("push", "-q", "origin", "main")
-                    local_head, remote_head = self.diverge_main_with_conflict()
-                    (self.repo / "staged").write_text("user staged\n")
-                    self.git("add", "staged")
-                    (self.repo / "unstaged").write_text("user unstaged\n")
-                    (self.repo / "untracked").write_text("user untracked\n")
-                    original_status = self.git("status", "--porcelain")
-
-                    result = self.run_cli("prepare", ok=False)
-                    self.assertIn("sync failed", result.stderr)
-                    self.assertEqual(self.git("branch", "--show-current"), "main")
-                    self.assertEqual(self.git("rev-parse", "HEAD"), local_head)
-                    self.assertEqual(self.git("ls-remote", "--heads", "origin", "main"), remote_head)
-                    self.assertEqual(self.git("status", "--porcelain"), original_status)
-                    self.assertEqual((self.repo / "staged").read_text(), "user staged\n")
-                    self.assertEqual((self.repo / "unstaged").read_text(), "user unstaged\n")
-                    self.assertEqual((self.repo / "untracked").read_text(), "user untracked\n")
-                    self.assert_no_in_progress_git_operation()
-                    self.git("reset", "--hard", "-q", "origin/main")
-                    (self.repo / "untracked").unlink()
-
-    def test_prepare_keeps_transport_backup_when_reapply_fails(self):
-        self.save_settings(sync={"mode": "update", "updateMethod": "merge"},
-                           backup={"mode": "all", "method": "commit"},
-                           branch={"mode": "current"})
-        self.git("push", "-q", "origin", "main")
-        local_head, _ = self.diverge_main_with_conflict()
-        (self.repo / "user-change").write_text("protected\n")
-        self.git("add", "user-change")
-        git_executable = shutil.which("git")
-        git_stub = self.bin / "git"
-        git_stub.write_text(f'#!/usr/bin/env bash\n'
-                            f'if [[ "$1" == stash && "$2" == apply ]]; then exit 1; fi\n'
-                            f'exec "{git_executable}" "$@"\n')
-        git_stub.chmod(0o755)
-
-        result = self.run_cli("prepare", ok=False)
-        self.assertIn("backup was retained", result.stderr)
-        self.assertEqual(self.git("rev-parse", "HEAD"), local_head)
-        self.assert_no_in_progress_git_operation()
-        self.assertTrue(self.git("stash", "list"))
-        self.assertTrue(self.git("for-each-ref", "--format=%(refname)",
-                                 "refs/agent-workflow/backups/"))
-
     def merge_local(self, method, cleanup):
         self.save_settings(integration={"mergeMethod": method}, branch={"deleteAfterIntegration": cleanup})
+        self.git("push", "-q", "origin", "main")
         self.prepare()
         self.change()
         self.commit()
@@ -1453,7 +1376,7 @@ class WorkflowTests(unittest.TestCase):
                 self.save_settings(integration={"mergeMethod": method})
                 self.git("push", "-q", "origin", "main")
                 branch_name = f"feat/test-{method}"
-                self.run_cli("prepare", "--branch-name", branch_name)
+                self.run_cli("prepare", "--base", "main", "--branch-name", branch_name)
                 self.change()
                 self.commit()
                 working_head = self.git("rev-parse", "HEAD")
@@ -1480,6 +1403,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_merge_invalid_state(self):
         self.save_settings(integration={"mergeMethod": "squash"})
+        self.git("push", "-q", "origin", "main")
         self.prepare()
         self.change()
         self.assertIn("working tree must be clean", self.run_cli("merge", "--message", "Deliver", ok=False).stderr)
@@ -1539,6 +1463,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_squash_default_single_commit_subject(self):
         self.save_settings(integration={"mergeMethod": "squash"})
+        self.git("push", "-q", "origin", "main")
         self.prepare()
         self.change()
         self.commit()
@@ -1547,7 +1472,8 @@ class WorkflowTests(unittest.TestCase):
 
     def test_squash_default_multiple_commit_summary(self):
         self.save_settings(integration={"mergeMethod": "squash"})
-        self.run_cli("prepare", "--branch-name", "feat/ai-harness-preflight")
+        self.git("push", "-q", "origin", "main")
+        self.run_cli("prepare", "--base", "main", "--branch-name", "feat/ai-harness-preflight")
         self.change()
         self.commit()
         self.change("other")
@@ -1577,7 +1503,7 @@ class WorkflowTests(unittest.TestCase):
         self.stub_gh()
         self.save_settings(integration={"mode": "pullRequest"})
         self.git("push", "-q", "origin", "main")
-        self.run_cli("prepare", "--branch-name", "feat/ai-harness-preflight")
+        self.run_cli("prepare", "--base", "main", "--branch-name", "feat/ai-harness-preflight")
         self.change()
         self.commit()
         self.run_cli("pr", "submit")

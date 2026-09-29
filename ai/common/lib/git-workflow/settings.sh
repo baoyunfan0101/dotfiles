@@ -27,7 +27,6 @@ load_prepare_settings() {
   BACKUP_METHOD="$(setting git.backup.method)"
   SYNC_MODE="$(setting git.sync.mode)"
   SYNC_UPDATE_METHOD="$(setting git.sync.updateMethod)"
-  BRANCH_MODE="$(setting git.branch.mode)"
   BASE_BRANCHES_JSON="$(setting git.branch.baseBranches)"
 }
 

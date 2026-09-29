@@ -3,7 +3,6 @@ CURRENT_ACTION="workflow"
 usage() {
   cat <<EOF2
 Usage:
-  git-workflow prepare [--branch-name NAME]
   git-workflow prepare --continue
   git-workflow prepare --base BRANCH --branch-name NAME
   git-workflow commit [--override-manual] --message MESSAGE (--all | -- PATH...)
@@ -69,7 +68,7 @@ Read-only tasks do not use workflow commands.
 
 Prepare options:
   --branch-name NAME
-      Candidate branch name using <type>/<description> when starting from a base.
+      New branch name using <type>/<description>; requires --base.
 
   --base BRANCH
       Start a new working branch from this configured base. Requires

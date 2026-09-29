@@ -21,7 +21,7 @@ Show the complete effective configuration or one value:
 ```bash
 agent-project effective
 agent-project get workflow.enabled
-agent-project get git.branch.mode
+agent-project get git.branch.baseBranches
 ```
 
 Set a value:
@@ -55,7 +55,7 @@ agent-project set \
   git.integration.mode pullRequest \
   git.commit.mode manual
 
-agent-project unset git.branch.mode git.integration.mergeMethod
+agent-project unset git.branch.baseBranches git.integration.mergeMethod
 ```
 
 Single-setting `set` and `unset` remain supported. An agent can translate a natural-language request into these commands; the CLI does not parse natural language.
@@ -83,7 +83,6 @@ Single-setting `set` and `unset` remain supported. An agent can translate a natu
       "mode": "automatic"
     },
     "branch": {
-      "mode": "fromBase",
       "baseBranches": ["main"],
       "deleteAfterIntegration": false
     },
@@ -103,7 +102,7 @@ Single-setting `set` and `unset` remain supported. An agent can translate a natu
 | `git.sync` | Repository synchronization during `prepare` and local integration. |
 | `git.backup` | Protect local changes during `prepare`. |
 | `git.commit` | Commit and push policy. |
-| `git.branch` | Working-branch policy. |
+| `git.branch` | Allowed bases and branch cleanup after integration. |
 | `git.integration` | Local integration or pull-request delivery, and merge method. |
 
 ### `schemaVersion`
@@ -169,7 +168,7 @@ When disabled, development and delivery commands return `skip reason=workflow-di
 
 ### `git.sync.mode`
 
-Controls synchronization of the current branch during `prepare` and the base branch during local `merge`. After a successful PR merge, the base is always fetched and fast-forwarded to the remote result.
+Controls synchronization during explicit branch continuation and local integration. Starting new work always fetches and fast-forwards its configured base. After a successful PR merge, the base is always fetched and fast-forwarded to the remote result.
 
 Default:
 
@@ -213,7 +212,7 @@ This setting has no effect when `git.sync.mode` is `"none"` or `"fetch"`.
 
 ## Git backup
 
-Before synchronization or branch selection, `git-workflow prepare` can preserve local changes and then restore them afterward.
+Before synchronization or branch creation, `git-workflow prepare` can preserve local changes and then restore them afterward.
 
 ### `git.backup.mode`
 
@@ -297,35 +296,11 @@ A manually overridden commit is not automatically pushed.
 
 ## Git branches
 
-### `git.branch.mode`
-
-Controls whether `git-workflow prepare` creates a working branch.
-
-Default:
-
-```json
-"fromBase"
-```
-
-Supported values:
-
-| Value | Meaning |
-|---|---|
-| `"current"` | Do not create a working branch when preparing from a base branch without `--base`. |
-| `"alwaysCreate"` | Create a working branch when preparing from a base branch without `--base`. |
-| `"fromBase"` | Create a working branch when preparing from a configured base branch without `--base`. |
-
-When the selected mode requires a new branch, `git-workflow prepare` must receive a candidate branch name:
-
-```bash
-git-workflow prepare --branch-name <candidate-branch>
-```
-
-Start an independent task with `git-workflow prepare --base <base> --branch-name <name>`, regardless of the checked-out branch or branch mode. This synchronizes the configured base and creates the new branch from its resulting HEAD. Use `git-workflow prepare --continue` only when intentionally continuing the checked-out working branch. A bare `prepare` on a working branch fails without modifying it. PR state does not control branch reuse. A working branch may contain multiple Task Specs and atomic commits when continuation is explicitly requested. A Task Spec does not authorize delivery. Delivery resolves its base when requested.
+Start an independent task with `git-workflow prepare --base <base> --branch-name <name>`. This synchronizes the configured base and creates the new branch from its resulting HEAD. Use `git-workflow prepare --continue` only when intentionally continuing the checked-out working branch. The checked-out branch alone never establishes continuation intent. PR state does not control branch reuse. A working branch may contain multiple Task Specs and atomic commits when continuation is explicitly requested. A Task Spec does not authorize delivery. Delivery resolves its base when requested.
 
 ### `git.branch.baseBranches`
 
-Defines the branches treated as base branches by `"fromBase"` mode.
+Defines the bases allowed for new work and delivery.
 
 Default:
 
@@ -341,15 +316,7 @@ Example:
 
 Each entry must be a unique, non-empty string.
 
-When:
-
-```json
-"git.branch.mode": "fromBase"
-```
-
-the list must not be empty.
-
-This list controls `fromBase` branch selection and the allowed/default delivery bases. Delivery uses explicit `--base`, then an existing PR's base for PR operations, then the sole configured base. Multiple possibilities require `--base`; bases outside this list are rejected. A configured base branch cannot itself be delivered.
+New work requires an explicit `--base` from this list. Delivery uses explicit `--base`, then an existing PR's base for PR operations, then the sole configured base. Multiple possibilities require `--base`; bases outside this list are rejected. A configured base branch cannot itself be delivered.
 
 ### `git.branch.deleteAfterIntegration`
 

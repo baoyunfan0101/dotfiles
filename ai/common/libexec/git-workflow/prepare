@@ -9,29 +9,40 @@ source "$WORKFLOW_ROOT/lib/git-workflow/branch.sh"
 
 PREPARE_BASE=""
 PREPARE_CONTINUE=false
+PREPARE_BASE_SET=false
+PREPARE_BRANCH_NAME_SET=false
 
 parse_prepare_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --continue)
+        [[ "$PREPARE_CONTINUE" == false ]] || fail "duplicate --continue"
         PREPARE_CONTINUE=true
         shift
         ;;
       --branch-name)
         [[ $# -ge 2 ]] || fail "missing value for --branch-name"
+        [[ "$PREPARE_BRANCH_NAME_SET" == false ]] || fail "duplicate --branch-name"
+        PREPARE_BRANCH_NAME_SET=true
         BRANCH_NAME="$2"
         shift 2
         ;;
       --branch-name=*)
+        [[ "$PREPARE_BRANCH_NAME_SET" == false ]] || fail "duplicate --branch-name"
+        PREPARE_BRANCH_NAME_SET=true
         BRANCH_NAME="${1#*=}"
         shift
         ;;
       --base)
         [[ $# -ge 2 && -n "$2" ]] || fail "missing value for --base"
+        [[ "$PREPARE_BASE_SET" == false ]] || fail "duplicate --base"
+        PREPARE_BASE_SET=true
         PREPARE_BASE="$2"
         shift 2
         ;;
       --base=*)
+        [[ "$PREPARE_BASE_SET" == false ]] || fail "duplicate --base"
+        PREPARE_BASE_SET=true
         PREPARE_BASE="${1#*=}"
         [[ -n "$PREPARE_BASE" ]] || fail "missing value for --base"
         shift
@@ -46,11 +57,14 @@ parse_prepare_args() {
     esac
   done
 
-  if [[ -n "$PREPARE_BASE" && -z "$BRANCH_NAME" ]]; then
-    fail "--base requires --branch-name"
-  fi
-  if [[ "$PREPARE_CONTINUE" == true && ( -n "$PREPARE_BASE" || -n "$BRANCH_NAME" ) ]]; then
+  if [[ "$PREPARE_CONTINUE" == true ]] &&
+      { [[ "$PREPARE_BASE_SET" == true ]] || [[ "$PREPARE_BRANCH_NAME_SET" == true ]]; }; then
     fail "--continue cannot be combined with --base or --branch-name"
+  fi
+  if [[ "$PREPARE_CONTINUE" != true ]]; then
+    [[ "$PREPARE_BASE_SET" == true ]] || fail "new work requires --base and --branch-name"
+    [[ "$PREPARE_BRANCH_NAME_SET" == true ]] || fail "--base requires --branch-name"
+    [[ -n "$BRANCH_NAME" ]] || fail "--branch-name is required"
   fi
 }
 
@@ -150,25 +164,15 @@ prepare() {
   ORIGINAL_BRANCH="$(current_branch)"
   load_prepare_settings
 
-  if [[ "$PREPARE_CONTINUE" != true && -z "$PREPARE_BASE" ]] &&
-      ! is_base_branch "$ORIGINAL_BRANCH"; then
-    fail "working branch requires --continue, or --base and --branch-name to start new work"
-  fi
   if [[ "$PREPARE_CONTINUE" == true ]] && is_base_branch "$ORIGINAL_BRANCH"; then
     fail "--continue requires a working branch"
   fi
 
-  if [[ -n "$PREPARE_BASE" ]]; then
+  if [[ "$PREPARE_CONTINUE" != true ]]; then
     prepare_from_base "$ORIGINAL_BRANCH"
     WORKING_BRANCH="$(current_branch)"
     print_prepare_result
     return 0
-  fi
-
-  if [[ "$PREPARE_CONTINUE" != true ]] &&
-      { [[ "$BRANCH_MODE" == alwaysCreate ]] ||
-      [[ "$BRANCH_MODE" == fromBase ]]; }; then
-    validate_new_branch "$BRANCH_NAME"
   fi
 
   create_backup
@@ -177,9 +181,6 @@ prepare() {
       fail "sync failed and protected changes could not be restored; backup was retained"
     fi
     fail "sync failed; original branch and protected changes were restored"
-  fi
-  if [[ "$PREPARE_CONTINUE" != true ]]; then
-    select_working_branch
   fi
   reapply_backup
 

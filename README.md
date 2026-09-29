@@ -101,7 +101,7 @@ Inspect or change project settings with:
 
 ```bash
 agent-project effective
-agent-project get git.branch.mode
+agent-project get git.branch.baseBranches
 agent-project set git.integration.mode pullRequest
 agent-project unset git.integration.mode
 ```
