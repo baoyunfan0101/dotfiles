@@ -20,7 +20,7 @@
 
 Read-only Git commands may run directly. Do not directly run Git commands that modify the working tree, index, history, branches, or remote state. Use `git-workflow` for supported mutations; if an operation is unsupported, stop and report the workflow capability gap instead of bypassing it with raw Git.
 
-Development: prepare -> edit -> commit*. Delivery requires explicit user authorization. Use `git-workflow --help` for syntax and options. Supported mutations: `prepare`, `commit`, `commit --amend`, `restore`, `revert`, `cherry-pick`, `rebase`, `push`, `branch create/switch/rename/delete`, `remote connect/reconnect/disconnect`, `merge`, `pr submit`, and `pr merge`.
+Development: prepare -> edit -> commit*. Delivery requires explicit user authorization. Use `git-workflow --help` for syntax and options. Supported mutations: `prepare`, `commit`, `commit --amend`, `restore`, `revert`, `cherry-pick`, `rebase`, `push`, `branch create/switch/rename/delete`, `merge`, `pr submit`, and `pr merge`.
 
 To continue work on the current branch, run before editing:
 

@@ -12,9 +12,6 @@ Usage:
   git-workflow cherry-pick COMMIT
   git-workflow rebase [--base BRANCH]
   git-workflow push [--override-manual]
-  git-workflow remote connect <url>
-  git-workflow remote reconnect <url>
-  git-workflow remote disconnect
   git-workflow branch create <name>
   git-workflow branch switch <name>
   git-workflow branch rename <new-name>
@@ -51,10 +48,6 @@ Commands:
   branch
       Create, switch, rename, or safely delete branches. See git-workflow
       branch --help.
-
-  remote
-      Manage the default remote repository connection. See git-workflow
-      remote --help.
 
   merge
       Integrate the current branch locally only with explicit user
@@ -160,23 +153,6 @@ Actions:
 New names use <type>/<description>. Existing branch names may be used for
 switch and delete. Remote rename checks for open GitHub pull requests.
 Explicit remote deletion uses Git only.
-EOF2
-}
-
-remote_usage() {
-  cat <<EOF2
-Usage:
-  git-workflow remote connect <url>
-  git-workflow remote reconnect <url>
-  git-workflow remote disconnect
-
-Actions:
-  connect
-      Connect the local repository to a remote repository.
-  reconnect
-      Change the existing remote repository connection.
-  disconnect
-      Remove the existing remote repository connection.
 EOF2
 }
 
