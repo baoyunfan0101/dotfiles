@@ -17,8 +17,7 @@ DEFAULT_SETTINGS = runpy.run_path(str(COMMON / "bin/agent-project"))["DEFAULT_SE
 GIT = shutil.which("git")
 BASH = shutil.which("bash")
 CORE_ACTIONS = ("prepare", "commit", "restore", "revert", "cherry-pick",
-                "rebase", "merge", "push", "remote connect", "remote reconnect",
-                "remote disconnect", "pr submit", "pr merge")
+                "rebase", "merge", "push", "pr submit", "pr merge")
 
 
 class PreflightTests(unittest.TestCase):
@@ -77,9 +76,6 @@ class PreflightTests(unittest.TestCase):
             "rebase": [],
             "merge": [],
             "push": [],
-            "remote connect": ["remote.git"],
-            "remote reconnect": ["remote.git"],
-            "remote disconnect": [],
             "pr submit": [],
             "pr merge": [],
         }
