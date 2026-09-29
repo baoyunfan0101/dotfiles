@@ -270,7 +270,7 @@ class WorkflowTests(unittest.TestCase):
         help_text = self.run_cli("--help").stdout
         self.assertEqual(set(re.findall(r"^  ([a-z][a-z-]*)$", help_text, re.MULTILINE)),
                          {"prepare", "commit", "restore", "revert", "cherry-pick",
-                          "rebase", "merge", "push", "branch", "pr"})
+                          "rebase", "merge", "push", "branch", "remote", "pr"})
         for meaning in ("before editing", "after editing", "--message MESSAGE",
                         "-- PATH...", "outside commit", "current branch",
                         "local", "pull request", "--branch-name NAME"):
@@ -316,7 +316,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_command_executables(self):
         for action in ("prepare", "commit", "restore", "revert", "cherry-pick",
-                       "rebase", "merge", "push", "branch", "pr"):
+                       "rebase", "merge", "push", "branch", "remote", "pr"):
             path = COMMON / "libexec/git-workflow" / action
             self.assertTrue(os.access(path, os.X_OK))
             self.assertEqual(path.read_text().splitlines()[0], "#!/usr/bin/env bash")
@@ -357,13 +357,18 @@ class WorkflowTests(unittest.TestCase):
 
         installed = destination / ".local/bin/git-workflow"
         for command in ("prepare", "commit", "restore", "revert", "cherry-pick",
-                        "rebase", "push", "branch", "merge", "pr"):
+                        "rebase", "push", "branch", "remote", "merge", "pr"):
             self.assertTrue(os.access(destination / ".local/libexec/git-workflow" / command, os.X_OK))
         for command in ("start", "finish"):
             self.assertFalse((destination / ".local/libexec/git-workflow" / command).exists())
         for action in ("submit", "merge"):
             self.assertIn("Usage:", self.run_cli("pr", action, "--help", executable=installed).stdout)
         self.assertIn("[git] prepare ok", self.run_cli("prepare", "--branch-name", "feat/test", executable=installed).stdout)
+        for action in ("connect", "reconnect", "disconnect"):
+            self.assertIn("Usage:", self.run_cli("remote", action, "--help", executable=installed).stdout)
+        self.run_cli("remote", "disconnect", executable=installed)
+        self.run_cli("remote", "connect", str(self.remote), executable=installed)
+        self.run_cli("remote", "reconnect", str(self.remote), executable=installed)
         self.change()
         self.run_cli("commit", "--message", "Installed", "--all", executable=installed)
         self.run_cli("push", executable=installed)
@@ -782,6 +787,95 @@ class WorkflowTests(unittest.TestCase):
         result = self.run_cli("prepare")
         self.assertIn("branch=codex/legacy created=false", result.stdout)
         self.assertEqual(self.git_snapshot(), before)
+
+    def test_remote_help_and_invalid_actions(self):
+        help_text = self.run_cli("--help").stdout
+        for action in ("connect", "reconnect", "disconnect"):
+            self.assertIn(f"git-workflow remote {action}", help_text)
+            for args in (("remote", "--help"), ("remote", action, "--help")):
+                output = self.run_cli(*args).stdout
+                self.assertIn(f"git-workflow remote {action}", output)
+                self.assertNotIn("origin", output)
+        for args in (("remote",), ("remote", "unknown")):
+            result = self.run_cli(*args, ok=False)
+            self.assertIn('[git] remote error reason="', result.stderr)
+
+    def test_remote_lifecycle_preserves_unrelated_remotes(self):
+        self.git("remote", "add", "other", "../other.git")
+        self.git("config", "remote.other.pushurl", "../other-push.git")
+        other = self.git("config", "--get-regexp", r"^remote\.other\.")
+        self.run_cli("remote", "disconnect")
+        for action, url in (("connect", str(self.remote)),
+                            ("reconnect", str(self.root / "new remote.git"))):
+            result = self.run_cli("remote", action, url)
+            self.assertEqual(result.stdout, f"[git] remote {action} ok url={url}\n")
+            self.assertEqual(self.git("remote", "get-url", "origin"), url)
+            self.assertEqual(self.git("config", "--get-regexp", r"^remote\.other\."), other)
+        self.assertEqual(self.run_cli("remote", "disconnect").stdout,
+                         "[git] remote disconnect ok\n")
+        self.assertEqual(self.git("remote"), "other")
+        self.assertEqual(self.git("config", "--get-regexp", r"^remote\.other\."), other)
+
+    def test_remote_invalid_transitions_do_not_mutate(self):
+        for connected in (True, False):
+            if not connected:
+                self.git("remote", "remove", "origin")
+            before = (self.repo / ".git/config").read_bytes()
+            cases = (("connect", "new.git"),) if connected else (
+                ("reconnect", "new.git"), ("disconnect",))
+            for args in cases:
+                result = self.run_cli("remote", *args, ok=False)
+                self.assertIn(f'[git] remote {args[0]} error reason="', result.stderr)
+                self.assertEqual((self.repo / ".git/config").read_bytes(), before)
+
+    def test_remote_argument_validation_does_not_mutate(self):
+        for connected in (True, False):
+            if not connected:
+                self.git("remote", "remove", "origin")
+            before = (self.repo / ".git/config").read_bytes()
+            for action in ("connect", "reconnect"):
+                for args in ((), ("one", "two"), ("",), ("   ",), ("--bad",),
+                             ("-x",), ("url\nother",), ("url\tother",),
+                             ("--help", "extra")):
+                    with self.subTest(connected=connected, action=action, args=args):
+                        result = self.run_cli("remote", action, *args, ok=False)
+                        self.assertIn(f'[git] remote {action} error reason="', result.stderr)
+                        self.assertEqual((self.repo / ".git/config").read_bytes(), before)
+            self.run_cli("remote", "disconnect", "extra", ok=False)
+            self.assertEqual((self.repo / ".git/config").read_bytes(), before)
+
+    def test_remote_disabled_and_repository_requirement(self):
+        (self.repo / ".ai/project.json").unlink()
+        before = (self.repo / ".git/config").read_bytes()
+        for action, args in (("connect", ("new.git",)), ("reconnect", ("new.git",)),
+                             ("disconnect", ())):
+            result = self.run_cli("remote", action, *args)
+            self.assertEqual(result.stdout,
+                             f"[git] remote {action} skip reason=workflow-disabled\n")
+            outside = subprocess.run([str(CLI), "remote", action, *args],
+                                     cwd=self.root, env=self.env, capture_output=True, text=True)
+            self.assertNotEqual(outside.returncode, 0)
+            self.assertIn("not inside a Git worktree", outside.stderr)
+        self.assertEqual((self.repo / ".git/config").read_bytes(), before)
+
+    def test_remote_connect_first_push(self):
+        self.git("remote", "remove", "origin")
+        target = self.root / "publish.git"
+        self.git("init", "--bare", str(target))
+        self.run_cli("remote", "connect", str(target))
+        self.run_cli("push")
+        self.assertEqual(self.git("rev-parse", "HEAD"),
+                         self.git("--git-dir", str(target), "rev-parse", "refs/heads/main"))
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "@{upstream}"), "origin/main")
+
+    def test_remote_stored_url_verification_and_multiple_urls(self):
+        self.git("config", "url.file:///rewritten/.insteadOf", "alias:")
+        self.git("config", "--add", "remote.origin.url", "extra.git")
+        self.run_cli("remote", "reconnect", "alias:repo.git")
+        self.assertEqual(self.git("config", "--get-all", "remote.origin.url"), "alias:repo.git")
+        self.run_cli("remote", "disconnect")
+        self.run_cli("remote", "connect", "alias:repo.git")
+        self.assertEqual(self.git("config", "--get-all", "remote.origin.url"), "alias:repo.git")
 
     def test_branch_create_switch_and_local_delete(self):
         head = self.git("rev-parse", "HEAD")
