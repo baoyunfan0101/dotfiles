@@ -39,6 +39,8 @@ Run the following commands inside the Git repository you want to configure.
 cd /path/to/your/repository
 
 agent-project set workflow.enabled true
+# For a repository without an existing remote connection:
+git-workflow remote connect <repository-url>
 agent-project effective
 agent-project --help
 git-workflow --help
@@ -68,6 +70,9 @@ Delivery                 -> explicit user authorization
 | `git-workflow pr merge` | Merge an existing PR when explicitly authorized. |
 | `git-workflow merge` | Integrate locally when explicitly authorized. |
 | `git-workflow push` | Auxiliary explicit push. |
+| `git-workflow remote connect <url>` | Connect the local repository to a remote repository. |
+| `git-workflow remote reconnect <url>` | Change the existing remote repository connection. |
+| `git-workflow remote disconnect` | Remove the existing remote repository connection. |
 
 A working branch may contain multiple Task Specs and atomic commits. Task completion, PR submission, and CI success do not authorize merging. PR metadata covers all commits from base to working branch. If `prepare` reports `workflow-disabled`, stop using workflow commands for that work. See `git-workflow --help` and `git-workflow pr --help`.
 

@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+
+CURRENT_ACTION="remote"
+case "${1:-}" in
+  -h|--help) remote_usage; exit 0 ;;
+  connect|reconnect|disconnect) REMOTE_ACTION="$1"; shift ;;
+  "") fail "remote action is required" ;;
+  *) fail "unknown remote action: $1" ;;
+esac
+CURRENT_ACTION="remote $REMOTE_ACTION"
+
+if [[ $# -eq 1 && ( "$1" == -h || "$1" == --help ) ]]; then
+  remote_usage
+  exit 0
+fi
+
+preflight_core
+require_repository
+if ! project_workflow_enabled; then
+  printf '[git] remote %s skip reason=workflow-disabled\n' "$REMOTE_ACTION"
+  exit 0
+fi
+
+if [[ "$REMOTE_ACTION" == disconnect ]]; then
+  [[ $# -eq 0 ]] || fail "usage: git-workflow remote disconnect"
+else
+  [[ $# -eq 1 ]] || fail "usage: git-workflow remote $REMOTE_ACTION <url>"
+  [[ -n "$1" && "$1" != -* && "$1" =~ [^[:space:]] && ! "$1" =~ [[:cntrl:]] ]] ||
+    fail "invalid remote URL"
+  REMOTE_URL="$1"
+fi
+
+# This name is shared with the existing first-push fallback, not a CLI option.
+DEFAULT_REMOTE=origin
+remote_names="$(git remote)" || fail "could not read remote repository connections"
+if [[ $'\n'"$remote_names"$'\n' == *$'\n'"$DEFAULT_REMOTE"$'\n'* ]]; then
+  [[ "$REMOTE_ACTION" != connect ]] || fail "default remote connection already exists"
+else
+  [[ "$REMOTE_ACTION" == connect ]] || fail "default remote connection does not exist"
+fi
+
+case "$REMOTE_ACTION" in
+  connect)
+    git remote add "$DEFAULT_REMOTE" "$REMOTE_URL" || fail "could not connect remote repository"
+    ;;
+  reconnect)
+    git config --replace-all "remote.$DEFAULT_REMOTE.url" "$REMOTE_URL" ||
+      fail "could not change remote repository connection"
+    ;;
+  disconnect)
+    git remote remove "$DEFAULT_REMOTE" || fail "could not remove remote repository connection"
+    remote_names="$(git remote)" || fail "could not verify remote disconnection"
+    if [[ $'\n'"$remote_names"$'\n' == *$'\n'"$DEFAULT_REMOTE"$'\n'* ]]; then
+      fail "remote disconnection verification failed"
+    fi
+    printf '[git] remote disconnect ok\n'
+    exit 0
+    ;;
+esac
+
+# Read the stored URL so insteadOf rewrites do not change the comparison.
+configured_url="$(git config --get-all "remote.$DEFAULT_REMOTE.url")" ||
+  fail "could not verify remote repository URL"
+[[ "$configured_url" == "$REMOTE_URL" ]] || fail "remote URL verification failed"
+printf '[git] remote %s ok url=%s\n' "$REMOTE_ACTION" "$REMOTE_URL"
