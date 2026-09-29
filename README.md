@@ -64,7 +64,8 @@ Delivery                 -> explicit user authorization
 
 | Command | Meaning |
 |---|---|
-| `git-workflow prepare --branch-name <name>` | Protect changes, sync, and select a working branch. |
+| `git-workflow prepare --base <base> --branch-name <name>` | Start an independent task on a new branch from the synchronized base. |
+| `git-workflow prepare --continue` | Explicitly continue the checked-out working branch. |
 | `git-workflow commit --message "<message>" -- <paths>...` | Record one atomic change. |
 | `git-workflow pr submit` | Create or update a PR when explicitly requested. |
 | `git-workflow pr merge` | Merge an existing PR when explicitly authorized. |

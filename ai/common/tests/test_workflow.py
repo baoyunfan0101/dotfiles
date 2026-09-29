@@ -138,7 +138,7 @@ class WorkflowTests(unittest.TestCase):
                 self.git("branch", base)
                 self.git("push", "-q", "origin", base)
         self.git("switch", "-c", "fix/manual")
-        result = self.run_cli("prepare")
+        result = self.run_cli("prepare", "--continue")
         self.assertIn("created=false", result.stdout)
         self.assertNotIn("base=", result.stdout)
         self.change()
@@ -722,7 +722,7 @@ class WorkflowTests(unittest.TestCase):
         self.save_settings(branch={"mode": "alwaysCreate"})
         self.assertIn("created=true", self.prepare().stdout)
         self.save_settings(branch={"mode": "fromBase"})
-        self.assertIn("created=false", self.prepare().stdout)
+        self.assertIn("created=false", self.run_cli("prepare", "--continue").stdout)
 
     def test_prepare_accepts_allowed_branch_types(self):
         self.save_settings(branch={"mode": "alwaysCreate"})
@@ -780,13 +780,71 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("invalid branch type: agent", result.stderr)
         self.assertEqual(self.git_snapshot(), before)
 
-    def test_prepare_continues_legacy_branch(self):
+    def test_prepare_explicitly_continues_legacy_branch(self):
         self.save_settings(branch={"mode": "fromBase"})
         self.git("switch", "-c", "codex/legacy")
         before = self.git_snapshot()
-        result = self.run_cli("prepare")
+        result = self.run_cli("prepare", "--continue")
         self.assertIn("branch=codex/legacy created=false", result.stdout)
         self.assertEqual(self.git_snapshot(), before)
+
+    def test_prepare_does_not_implicitly_reuse_working_branch(self):
+        self.prepare()
+        self.change()
+        self.commit()
+        old_head = self.git("rev-parse", "HEAD")
+        for args in ((), ("--branch-name", "feat/next")):
+            with self.subTest(args=args):
+                before = self.git_snapshot()
+                result = self.run_cli("prepare", *args, ok=False)
+                self.assertIn("working branch requires --continue", result.stderr)
+                self.assertEqual(self.git_snapshot(), before)
+        self.run_cli("prepare", "--base", "main", "--branch-name", "feat/next")
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "main"))
+        self.assertEqual(self.git("rev-parse", "feat/test"), old_head)
+
+    def test_prepare_new_task_ignores_pr_state(self):
+        self.save_settings(integration={"mode": "pullRequest"})
+        self.git("push", "-q", "origin", "main")
+        for pr_state in ("none", "open", "merged"):
+            with self.subTest(pr_state=pr_state):
+                self.git("switch", "main")
+                self.stub_gh()
+                state_path = Path(self.env["GH_STATE"])
+                state_path.unlink(missing_ok=True)
+                branch = f"feat/previous-{pr_state}"
+                self.run_cli("prepare", "--base", "main", "--branch-name", branch)
+                self.change()
+                self.commit()
+                if pr_state != "none":
+                    self.run_cli("pr", "submit")
+                    if pr_state == "merged":
+                        state = json.loads(state_path.read_text())
+                        state["state"] = "MERGED"
+                        state_path.write_text(json.dumps(state))
+                old_head = self.git("rev-parse", "HEAD")
+                next_branch = f"feat/next-{pr_state}"
+                self.run_cli("prepare", "--base", "main", "--branch-name", next_branch)
+                self.assertEqual(self.git("branch", "--show-current"), next_branch)
+                self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "main"))
+                self.assertEqual(self.git("rev-parse", branch), old_head)
+
+    def test_prepare_explicitly_continues_open_pr(self):
+        self.stub_gh()
+        self.save_settings(integration={"mode": "pullRequest"})
+        self.prepare()
+        self.change()
+        self.commit()
+        self.run_cli("pr", "submit")
+        before = self.git("rev-parse", "HEAD")
+        self.assertIn("created=false", self.run_cli("prepare", "--continue").stdout)
+        (self.repo / "review-fix").write_text("feedback\n")
+        self.commit("review-fix")
+        self.assertNotEqual(self.git("rev-parse", "HEAD"), before)
+        self.assertIn(self.git("rev-parse", "HEAD"),
+                      self.git("ls-remote", "--heads", "origin", "feat/test"))
+        self.run_cli("pr", "submit")
+        self.assertEqual(sum(call[:2] == ["pr", "create"] for call in self.gh_calls()), 1)
 
     def test_remote_help_and_invalid_actions(self):
         help_text = self.run_cli("--help").stdout
@@ -1434,7 +1492,7 @@ class WorkflowTests(unittest.TestCase):
         self.prepare()
         for subject in ("Commit A", "Commit B", "Commit C"):
             (self.repo / "tracked").write_text(subject)
-            self.run_cli("prepare")
+            self.run_cli("prepare", "--continue")
             self.run_cli("commit", "--message", subject, "--", "tracked")
         self.assertEqual(self.gh_calls(), [])
         self.assertIn("url=https://example.invalid/pr/1", self.run_cli("pr", "submit").stdout)
@@ -1500,7 +1558,7 @@ class WorkflowTests(unittest.TestCase):
     def test_squash_default_unconventional_branch(self):
         self.save_settings(integration={"mergeMethod": "squash"})
         self.git("switch", "-c", "work-in-progress")
-        self.assertIn("created=false", self.run_cli("prepare").stdout)
+        self.assertIn("created=false", self.run_cli("prepare", "--continue").stdout)
         self.change()
         self.commit()
         self.change("other")

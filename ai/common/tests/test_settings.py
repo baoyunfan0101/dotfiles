@@ -60,7 +60,7 @@ class SettingsTests(unittest.TestCase):
         self.assertIn("agent-project schema [path]", instructions)
         self.assertIn("agent-project --help", instructions)
         self.assertIn("git-workflow --help", instructions)
-        for meaning in ("prepare -> edit -> commit*", "does not define a branch boundary",
+        for meaning in ("prepare -> edit -> commit*", "checked-out branch alone",
                         "multiple Task Specs", "explicitly asks", "pr submit",
                         "explicitly authorizes", "pr merge", "local integration",
                         "Never infer merge authorization", "CI success"):
@@ -68,6 +68,7 @@ class SettingsTests(unittest.TestCase):
         self.assertIn("Do not read or edit `.ai/project.json` directly", instructions)
         for meaning in ("Read-only Git commands may run directly", "Do not directly run Git commands",
                         "workflow capability gap", "prepare --base <base> --branch-name <name>",
+                        "prepare --continue",
                         "commit --amend", "restore", "revert", "cherry-pick", "rebase"):
             self.assertIn(meaning, instructions)
         self.assertNotIn("git.integration.mode", instructions)

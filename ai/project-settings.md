@@ -311,9 +311,9 @@ Supported values:
 
 | Value | Meaning |
 |---|---|
-| `"current"` | Continue working on the current branch. Never create a working branch automatically. |
-| `"alwaysCreate"` | Always create a new working branch during `git-workflow prepare`. |
-| `"fromBase"` | Create a new working branch only when the current branch is listed in `git.branch.baseBranches`. Otherwise continue on the current branch. |
+| `"current"` | Do not create a working branch when preparing from a base branch without `--base`. |
+| `"alwaysCreate"` | Create a working branch when preparing from a base branch without `--base`. |
+| `"fromBase"` | Create a working branch when preparing from a configured base branch without `--base`. |
 
 When the selected mode requires a new branch, `git-workflow prepare` must receive a candidate branch name:
 
@@ -321,7 +321,7 @@ When the selected mode requires a new branch, `git-workflow prepare` must receiv
 git-workflow prepare --branch-name <candidate-branch>
 ```
 
-A working branch is an ordinary Git branch and may contain multiple Task Specs and atomic commits. Existing branches work with `current` and `fromBase`; a new Task Spec does not by itself select a new branch. Delivery resolves its base when requested.
+Start an independent task with `git-workflow prepare --base <base> --branch-name <name>`, regardless of the checked-out branch or branch mode. This synchronizes the configured base and creates the new branch from its resulting HEAD. Use `git-workflow prepare --continue` only when intentionally continuing the checked-out working branch. A bare `prepare` on a working branch fails without modifying it. PR state does not control branch reuse. A working branch may contain multiple Task Specs and atomic commits when continuation is explicitly requested. A Task Spec does not authorize delivery. Delivery resolves its base when requested.
 
 ### `git.branch.baseBranches`
 

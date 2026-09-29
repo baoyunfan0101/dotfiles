@@ -8,10 +8,15 @@ source "$WORKFLOW_ROOT/lib/git-workflow/sync.sh"
 source "$WORKFLOW_ROOT/lib/git-workflow/branch.sh"
 
 PREPARE_BASE=""
+PREPARE_CONTINUE=false
 
 parse_prepare_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --continue)
+        PREPARE_CONTINUE=true
+        shift
+        ;;
       --branch-name)
         [[ $# -ge 2 ]] || fail "missing value for --branch-name"
         BRANCH_NAME="$2"
@@ -43,6 +48,9 @@ parse_prepare_args() {
 
   if [[ -n "$PREPARE_BASE" && -z "$BRANCH_NAME" ]]; then
     fail "--base requires --branch-name"
+  fi
+  if [[ "$PREPARE_CONTINUE" == true && ( -n "$PREPARE_BASE" || -n "$BRANCH_NAME" ) ]]; then
+    fail "--continue cannot be combined with --base or --branch-name"
   fi
 }
 
@@ -142,6 +150,14 @@ prepare() {
   ORIGINAL_BRANCH="$(current_branch)"
   load_prepare_settings
 
+  if [[ "$PREPARE_CONTINUE" != true && -z "$PREPARE_BASE" ]] &&
+      ! is_base_branch "$ORIGINAL_BRANCH"; then
+    fail "working branch requires --continue, or --base and --branch-name to start new work"
+  fi
+  if [[ "$PREPARE_CONTINUE" == true ]] && is_base_branch "$ORIGINAL_BRANCH"; then
+    fail "--continue requires a working branch"
+  fi
+
   if [[ -n "$PREPARE_BASE" ]]; then
     prepare_from_base "$ORIGINAL_BRANCH"
     WORKING_BRANCH="$(current_branch)"
@@ -149,8 +165,9 @@ prepare() {
     return 0
   fi
 
-  if [[ "$BRANCH_MODE" == alwaysCreate ]] ||
-      { [[ "$BRANCH_MODE" == fromBase ]] && is_base_branch "$ORIGINAL_BRANCH"; }; then
+  if [[ "$PREPARE_CONTINUE" != true ]] &&
+      { [[ "$BRANCH_MODE" == alwaysCreate ]] ||
+      [[ "$BRANCH_MODE" == fromBase ]]; }; then
     validate_new_branch "$BRANCH_NAME"
   fi
 
@@ -161,7 +178,9 @@ prepare() {
     fi
     fail "sync failed; original branch and protected changes were restored"
   fi
-  select_working_branch
+  if [[ "$PREPARE_CONTINUE" != true ]]; then
+    select_working_branch
+  fi
   reapply_backup
 
   WORKING_BRANCH="$(current_branch)"
