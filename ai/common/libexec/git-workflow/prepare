@@ -103,8 +103,19 @@ prepare_from_base() {
   local created_branch=""
 
   is_base_branch "$PREPARE_BASE" || fail "base is not configured in git.branch.baseBranches: $PREPARE_BASE"
-  git show-ref --verify --quiet "refs/heads/$PREPARE_BASE" || fail "local base branch not found: $PREPARE_BASE"
   validate_new_branch "$BRANCH_NAME"
+  if is_base_branch "$BRANCH_NAME"; then
+    fail "working branch is a configured base branch: $BRANCH_NAME"
+  fi
+  if [[ "$(git symbolic-ref --quiet HEAD)" == "refs/heads/$PREPARE_BASE" ]] &&
+      ! git rev-parse --verify HEAD^{commit} >/dev/null 2>&1 &&
+      [[ -z "$(git rev-list --all --max-count=1)" ]]; then
+    git symbolic-ref HEAD "refs/heads/$BRANCH_NAME" || fail "branch creation failed: $BRANCH_NAME"
+    [[ "$(current_branch)" == "$BRANCH_NAME" ]] || fail "created branch verification failed: $BRANCH_NAME"
+    BRANCH_CREATED=true
+    return 0
+  fi
+  git show-ref --verify --quiet "refs/heads/$PREPARE_BASE" || fail "local base branch not found: $PREPARE_BASE"
   base_head="$(git rev-parse "$PREPARE_BASE^{commit}")"
 
   create_backup
