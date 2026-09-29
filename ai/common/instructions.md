@@ -22,17 +22,17 @@ Read-only Git commands may run directly. Do not directly run Git commands that m
 
 Development: prepare -> edit -> commit*. Delivery requires explicit user authorization. Use `git-workflow --help` for syntax and options. Supported mutations: `prepare`, `commit`, `commit --amend`, `restore`, `revert`, `cherry-pick`, `rebase`, `push`, `branch create/switch/rename/delete`, `remote connect/reconnect/disconnect`, `merge`, `pr submit`, and `pr merge`.
 
-To continue work on the current branch, run before editing:
+For each new independent task, start a new branch from the configured base before editing:
 
 ```bash
-git-workflow prepare
+git-workflow prepare --base <base> --branch-name <name>
 ```
 
-To explicitly start a new branch from the latest configured base, run `git-workflow prepare --base <base> --branch-name <name>`.
+To explicitly continue work already assigned to the checked-out working branch, run `git-workflow prepare --continue`. The checked-out branch alone does not establish continuation intent. This also applies when it has no PR or its PR is open, closed, or merged. An open PR can be updated with further commits and pushes after explicit continuation.
 
 If `prepare` reports `workflow-disabled`, do not use further workflow commands for that work.
 
-A Task Spec does not define a branch boundary. A working branch may contain multiple Task Specs and atomic commits.
+A working branch may contain multiple Task Specs and atomic commits when continuation is explicitly requested. A Task Spec does not authorize PR submission, merge, or integration.
 
 Delivery uses `--base`, an existing PR's base, or the sole configured base. Supply `--base` when ambiguous; it must be configured.
 

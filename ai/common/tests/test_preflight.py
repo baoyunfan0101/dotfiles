@@ -37,6 +37,9 @@ class PreflightTests(unittest.TestCase):
         self.configure("localMerge")
         self.git("add", ".")
         self.git("commit", "-qm", "Initial")
+        self.git("init", "-q", "--bare", str(self.root / "remote.git"))
+        self.git("remote", "add", "origin", str(self.root / "remote.git"))
+        self.git("push", "-qu", "origin", "main")
         self.stub("git", f'printf "%s\\n" "$*" >> {shlex.quote(str(self.log))}\n'
                   f'exec {shlex.quote(GIT)} "$@"')
         (self.bin / "python3").symlink_to(sys.executable)
@@ -69,7 +72,7 @@ class PreflightTests(unittest.TestCase):
 
     def run_action(self, action, cwd=None):
         arguments = {
-            "prepare": ["--branch-name", "feat/test"],
+            "prepare": ["--base", "main", "--branch-name", "feat/test"],
             "commit": ["--message", "Change", "--all"],
             "restore": ["--", "tracked"],
             "revert": ["HEAD"],
@@ -91,10 +94,11 @@ class PreflightTests(unittest.TestCase):
         )
 
     def assert_ready(self):
+        self.git("push", "-q", "origin", "main")
         result = self.prepare()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
-        self.assertEqual(result.stdout, "[git] prepare ok backup=none sync=skipped "
+        self.assertEqual(result.stdout, "[git] prepare ok backup=none sync=updated "
                          "branch=feat/test created=true\n")
 
     def assert_blocked(self, check, reason, required_by, fix, action="prepare"):

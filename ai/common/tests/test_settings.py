@@ -60,7 +60,7 @@ class SettingsTests(unittest.TestCase):
         self.assertIn("agent-project schema [path]", instructions)
         self.assertIn("agent-project --help", instructions)
         self.assertIn("git-workflow --help", instructions)
-        for meaning in ("prepare -> edit -> commit*", "does not define a branch boundary",
+        for meaning in ("prepare -> edit -> commit*", "checked-out branch alone",
                         "multiple Task Specs", "explicitly asks", "pr submit",
                         "explicitly authorizes", "pr merge", "local integration",
                         "Never infer merge authorization", "CI success"):
@@ -68,6 +68,7 @@ class SettingsTests(unittest.TestCase):
         self.assertIn("Do not read or edit `.ai/project.json` directly", instructions)
         for meaning in ("Read-only Git commands may run directly", "Do not directly run Git commands",
                         "workflow capability gap", "prepare --base <base> --branch-name <name>",
+                        "prepare --continue",
                         "commit --amend", "restore", "revert", "cherry-pick", "rebase"):
             self.assertIn(meaning, instructions)
         self.assertNotIn("git.integration.mode", instructions)
@@ -247,7 +248,7 @@ class SettingsTests(unittest.TestCase):
                 "sync": {"mode": "update", "updateMethod": "ffOnly"},
                 "backup": {"mode": "all", "method": "stash"},
                 "commit": {"mode": "automatic"},
-                "branch": {"mode": "fromBase", "baseBranches": ["main"],
+                "branch": {"baseBranches": ["main"],
                            "deleteAfterIntegration": False},
                 "integration": {"mode": "localMerge", "mergeMethod": "mergeCommit"},
             },
@@ -368,7 +369,7 @@ class SettingsTests(unittest.TestCase):
             "workflow": {"enabled": True},
             "git": {
                 "commit": {"mode": "manual"},
-                "branch": {"mode": "current", "baseBranches": []},
+                "branch": {"baseBranches": []},
             },
         })
         before = self.config.read_bytes()
@@ -377,8 +378,8 @@ class SettingsTests(unittest.TestCase):
              "unknown setting"),
             (("workflow.enabled", "false", "git.integration.mode", "invalid"),
              "must be one of"),
-            (("git.branch.mode", "fromBase", "workflow.enabled", "false"),
-             "must not be empty"),
+            (("git.branch.baseBranches", '["main","main"]', "workflow.enabled", "false"),
+             "must not contain duplicates"),
         )
         for arguments, error in cases:
             with self.subTest(arguments=arguments):
@@ -421,12 +422,12 @@ class SettingsTests(unittest.TestCase):
         self.write_config({
             "schemaVersion": 1,
             "workflow": {"enabled": True},
-            "git": {"branch": {"mode": "current", "baseBranches": []}},
+            "git": {"branch": {"baseBranches": []}},
         })
         before = self.config.read_bytes()
         for arguments, error in (
-            (("git.branch.mode", "git.unknown"), "unknown setting"),
-            (("git.branch.mode", "workflow.enabled"), "must not be empty"),
+            (("git.unknown", "workflow.enabled"), "unknown setting"),
+            (("git.unknown", "git.branch.baseBranches"), "unknown setting"),
             (("schemaVersion", "workflow.enabled"), "unknown setting"),
         ):
             with self.subTest(arguments=arguments):
@@ -494,7 +495,7 @@ class SettingsTests(unittest.TestCase):
         self.write_config({
             "schemaVersion": 1,
             "workflow": {"enabled": True},
-            "git": {"branch": {"mode": "current", "baseBranches": []}},
+            "git": {"branch": {"baseBranches": []}},
         })
         before = self.config.read_bytes()
         for arguments in (
@@ -502,8 +503,8 @@ class SettingsTests(unittest.TestCase):
             ("set", "git.integration.mode", "invalid"),
             ("set", "git.branch.baseBranches", '["main",1]'),
             ("set", "git.branch.baseBranches", '["main","main"]'),
-            ("set", "git.branch.mode", "fromBase"),
-            ("unset", "git.branch.mode"),
+            ("set", "git.unknown", "value"),
+            ("unset", "git.unknown"),
         ):
             with self.subTest(arguments=arguments):
                 result = self.run_project(*arguments)

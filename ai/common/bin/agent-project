@@ -31,13 +31,9 @@ SETTING_SPECS = {
     "git.commit.mode": {"type": str, "default": "automatic",
                         "values": {"manual", "automatic"},
                         "description": "Whether workflow commits and pushes are automatic."},
-    "git.branch.mode": {"type": str, "default": "fromBase",
-                        "values": {"current", "alwaysCreate", "fromBase"},
-                        "description": "How the working branch is selected."},
     "git.branch.baseBranches": {"type": list, "default": ["main"],
-                                "description": "Bases used by fromBase branch selection and allowed/default delivery targets.",
-                                "constraints": ["unique non-empty strings",
-                                                "non-empty when git.branch.mode=fromBase"]},
+                                "description": "Allowed bases for new work and delivery.",
+                                "constraints": ["unique non-empty strings"]},
     "git.branch.deleteAfterIntegration": {"type": bool, "default": False,
                                           "description": "Whether local and remote working branches are deleted after successful integration."},
     "git.integration.mode": {"type": str, "default": "localMerge",
@@ -216,15 +212,6 @@ def validate_values(settings):
 
     if len(base_branches) != len(set(base_branches)):
         fail("git.branch.baseBranches must not contain duplicates")
-
-    if (
-        settings["git"]["branch"]["mode"] == "fromBase"
-        and not base_branches
-    ):
-        fail(
-            "git.branch.baseBranches must not be empty "
-            "when git.branch.mode is fromBase"
-        )
 
 
 def load_settings():

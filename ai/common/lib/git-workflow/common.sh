@@ -3,7 +3,7 @@ CURRENT_ACTION="workflow"
 usage() {
   cat <<EOF2
 Usage:
-  git-workflow prepare [--branch-name NAME]
+  git-workflow prepare --continue
   git-workflow prepare --base BRANCH --branch-name NAME
   git-workflow commit [--override-manual] --message MESSAGE (--all | -- PATH...)
   git-workflow commit --amend [--message MESSAGE] (--all | -- PATH...)
@@ -25,8 +25,8 @@ Usage:
 
 Commands:
   prepare
-      Prepare the current branch before editing. With --base and --branch-name,
-      start a new branch from the updated configured base.
+      Start new work before editing with --base and --branch-name. Explicitly
+      continue the checked-out working branch with --continue.
 
   commit
       Commit one atomic change after editing. Automatic mode also pushes it.
@@ -68,11 +68,15 @@ Read-only tasks do not use workflow commands.
 
 Prepare options:
   --branch-name NAME
-      Candidate branch name using <type>/<description> when starting from a base.
+      New branch name using <type>/<description>; requires --base.
 
   --base BRANCH
       Start a new working branch from this configured base. Requires
-      --branch-name; without --base, prepare continues the current branch.
+      --branch-name and synchronizes the base before branch creation.
+
+  --continue
+      Continue the checked-out working branch, including one with an open PR.
+      A working branch is never reused by prepare without this option.
 
 Commit options:
   --message MESSAGE
