@@ -2,6 +2,25 @@
 set -Eeuo pipefail
 
 test_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+unittest_args=(discover -s "$test_root/ai/common/tests")
+
+if (( $# > 1 )); then
+  printf 'Usage: ./test.sh [test name]\n' >&2
+  exit 2
+fi
+if (( $# == 1 )); then
+  test_name="$1"
+  if [[ ! "$test_name" =~ ^[a-zA-Z0-9_]+$ ]]; then
+    printf 'Invalid test target: %s\n' "$test_name" >&2
+    exit 2
+  fi
+  test_file="test_${test_name}.py"
+  if [[ ! -f "$test_root/ai/common/tests/$test_file" ]]; then
+    printf 'Unknown test target: %s\n' "$test_name" >&2
+    exit 2
+  fi
+  unittest_args+=(-p "$test_file")
+fi
 
 while IFS= read -r -d '' tracked_file; do
   source_file="$test_root/$tracked_file"
@@ -38,4 +57,4 @@ env -i \
   GIT_ALLOW_PROTOCOL=file \
   LC_ALL=C PYTHONUTF8=1 PYTHONDONTWRITEBYTECODE=1 \
   DOTFILES_TEST_SANDBOX="$test_sandbox" \
-  python3 -B -m unittest discover -s "$test_root/ai/common/tests"
+  python3 -B -m unittest "${unittest_args[@]}"
