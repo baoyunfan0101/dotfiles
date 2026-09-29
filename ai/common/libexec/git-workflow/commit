@@ -140,8 +140,12 @@ commit_changes() {
       git add -A -- "${COMMIT_PATHS[@]}"
     fi
 
-    if [[ "$COMMIT_AMEND" != true ]] && git diff --quiet HEAD -- "${COMMIT_PATHS[@]}"; then
-      fail "selected paths have no changes to commit"
+    if [[ "$COMMIT_AMEND" != true ]]; then
+      if git rev-parse --verify HEAD^{commit} >/dev/null 2>&1; then
+        git diff --quiet HEAD -- "${COMMIT_PATHS[@]}" && fail "selected paths have no changes to commit"
+      else
+        git diff --cached --quiet -- "${COMMIT_PATHS[@]}" && fail "selected paths have no changes to commit"
+      fi
     fi
 
     if [[ "$COMMIT_AMEND" == true ]]; then

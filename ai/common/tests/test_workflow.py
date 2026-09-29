@@ -70,6 +70,21 @@ class WorkflowTests(unittest.TestCase):
     def prepare(self):
         return self.run_cli("prepare", "--base", "main", "--branch-name", "feat/test")
 
+    def unborn_repo(self, head="main"):
+        self.repo = self.root / "empty-repo"
+        self.remote = self.root / "empty-remote.git"
+        self.repo.mkdir()
+        self.git("init", "-q", "-b", head)
+        self.git("init", "-q", "--bare", str(self.remote))
+        self.git("remote", "add", "origin", str(self.remote))
+        self.settings(sync={"mode": "update"})
+
+    def assert_unborn(self, branch):
+        self.assertEqual(self.git("symbolic-ref", "--short", "HEAD"), branch)
+        self.assertNotEqual(subprocess.run(["git", "rev-parse", "--verify", "HEAD"],
+                                           cwd=self.repo, env=self.env, capture_output=True).returncode, 0)
+        self.assertEqual(self.git("rev-list", "--all", "--count"), "0")
+
     def change(self, name="tracked"):
         (self.repo / name).write_text("changed\n")
 
@@ -712,6 +727,72 @@ class WorkflowTests(unittest.TestCase):
                     self.git("restore", "--staged", "--worktree", "tracked")
                     (self.repo / "other").unlink()
                     self.git("switch", "main")
+
+    def test_prepare_bootstraps_unborn_base_and_preserves_files(self):
+        self.unborn_repo()
+        (self.repo / "README.md").write_bytes(b"initial project\n")
+        (self.repo / "staged.txt").write_bytes(b"staged\n")
+        self.git("add", "staged.txt")
+        before = self.git("status", "--porcelain")
+        result = self.run_cli("prepare", "--base", "main", "--branch-name", "feat/init")
+        self.assertIn("branch=feat/init created=true", result.stdout)
+        self.assert_unborn("feat/init")
+        self.assertEqual(self.git("status", "--porcelain"), before)
+        self.assertEqual((self.repo / "README.md").read_bytes(), b"initial project\n")
+        self.assertNotEqual(subprocess.run(["git", "show-ref", "--heads"], cwd=self.repo,
+                                           env=self.env, capture_output=True).returncode, 0)
+
+    def test_unborn_commit_all_pushes_working_branch(self):
+        self.unborn_repo()
+        (self.repo / "README.md").write_text("initial project\n")
+        self.run_cli("prepare", "--base", "main", "--branch-name", "feat/init")
+        result = self.run_cli("commit", "--message", "Initial", "--all")
+        self.assertIn("branch=feat/init pushed=true", result.stdout)
+        self.assertEqual(self.git("rev-list", "--parents", "-n", "1", "HEAD").split(),
+                         [self.git("rev-parse", "HEAD")])
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/init").split()[0],
+                         self.git("rev-parse", "HEAD"))
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "main"), "")
+        self.assertNotEqual(subprocess.run(["git", "show-ref", "--verify", "refs/heads/main"],
+                                           cwd=self.repo, env=self.env, capture_output=True).returncode, 0)
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "@{upstream}"),
+                         "origin/feat/init")
+
+    def test_unborn_path_scoped_commit_creates_root(self):
+        self.unborn_repo()
+        (self.repo / "README.md").write_text("initial project\n")
+        (self.repo / "other").write_text("keep untracked\n")
+        self.run_cli("prepare", "--base", "main", "--branch-name", "feat/init")
+        self.run_cli("commit", "--message", "Initial", "--", "README.md")
+        self.assertEqual(self.git("show", "HEAD:README.md"), "initial project")
+        self.assertEqual(self.git("ls-tree", "-r", "--name-only", "HEAD"), "README.md")
+        self.assertTrue((self.repo / "other").exists())
+        self.assertEqual(self.git("rev-list", "--parents", "-n", "1", "HEAD").split(),
+                         [self.git("rev-parse", "HEAD")])
+
+    def test_unborn_prepare_rejects_invalid_states(self):
+        self.unborn_repo(head="develop")
+        self.settings(branch={"baseBranches": ["main", "develop"]})
+        for arguments, message in (
+            (("--base", "main", "--branch-name", "feat/init"), "local base branch not found"),
+            (("--base", "outside", "--branch-name", "feat/init"), "base is not configured"),
+            (("--base", "develop", "--branch-name", "invalid"), "branch name must use"),
+            (("--continue",), "--continue requires a working branch"),
+        ):
+            with self.subTest(arguments=arguments):
+                self.assertIn(message, self.run_cli("prepare", *arguments, ok=False).stderr)
+                self.assert_unborn("develop")
+        self.settings(branch={"baseBranches": ["main", "develop", "feat/base"]})
+        self.assertIn("configured base branch", self.run_cli("prepare", "--base", "develop",
+                      "--branch-name", "feat/base", ok=False).stderr)
+        self.assert_unborn("develop")
+
+    def test_missing_base_with_history_does_not_bootstrap(self):
+        self.git("switch", "-c", "feat/current")
+        self.git("branch", "-D", "main")
+        result = self.run_cli("prepare", "--base", "main", "--branch-name", "feat/next", ok=False)
+        self.assertIn("local base branch not found", result.stderr)
+        self.assertEqual(self.git("branch", "--show-current"), "feat/current")
 
     def test_prepare_accepts_allowed_branch_types(self):
         for branch_type in ("feat", "fix", "chore", "docs", "refactor", "test",

@@ -298,6 +298,8 @@ A manually overridden commit is not automatically pushed.
 
 Start an independent task with `git-workflow prepare --base <base> --branch-name <name>`. This synchronizes the configured base and creates the new branch from its resulting HEAD. Use `git-workflow prepare --continue` only when intentionally continuing the checked-out working branch. The checked-out branch alone never establishes continuation intent. PR state does not control branch reuse. A working branch may contain multiple Task Specs and atomic commits when continuation is explicitly requested. A Task Spec does not authorize delivery. Delivery resolves its base when requested.
 
+In a genuinely empty repository, the configured base may be unborn. New work still requires explicit `--base` and `--branch-name`; `prepare` switches to the requested unborn working branch without creating a commit, and the first real commit is made there.
+
 ### `git.branch.baseBranches`
 
 Defines the bases allowed for new work and delivery.
