@@ -5,6 +5,7 @@ usage() {
 Usage:
   git-workflow prepare --continue
   git-workflow prepare --base BRANCH --branch-name NAME
+  git-workflow sync
   git-workflow backup create
   git-workflow backup list
   git-workflow backup apply <id>
@@ -32,6 +33,10 @@ Commands:
       Start new work before editing with --base and --branch-name. Explicitly
       continue the checked-out working branch with --continue. Selected local
       changes are backed up and discarded before preparation.
+
+  sync
+      Fetch and fast-forward the checked-out configured base branch from its
+      remote tracking branch. Requires a clean working tree.
 
   backup
       Save and discard selected changes; list, apply, or delete backups by stable ID.

@@ -66,6 +66,7 @@ Delivery                 -> explicit user authorization
 |---|---|
 | `git-workflow prepare --base <base> --branch-name <name>` | Start an independent task on a new branch from the synchronized base. |
 | `git-workflow prepare --continue` | Explicitly continue the checked-out working branch. |
+| `git-workflow sync` | Fetch and fast-forward the checked-out configured base branch from its tracked remote branch. |
 | `git-workflow backup create` | Verify a persistent local backup, then discard the selected changes. |
 | `git-workflow backup list` | List workflow backups by stable ID. |
 | `git-workflow backup apply <id>` | Apply old changes to the current state while retaining the backup. |
@@ -84,6 +85,8 @@ Delivery                 -> explicit user authorization
 A working branch may contain multiple Task Specs and atomic commits. Task completion, PR submission, and CI success do not authorize merging. PR metadata covers all commits from base to working branch. If `prepare` reports `workflow-disabled`, stop using workflow commands for that work. See `git-workflow --help` and `git-workflow pr --help`.
 
 Existing Git branches need no registration. Delivery chooses `--base`, an existing PR's base, or the sole configured `git.branch.baseBranches` entry. Ambiguous bases require `--base`; configured base branches cannot be delivered.
+
+After a PR is merged remotely, use `git-workflow branch switch main` followed by `git-workflow sync` to update the local base. Sync requires a clean working tree and configured remote tracking. It succeeds when already current and rejects local history that cannot be fast-forwarded. `prepare` remains for starting or continuing development work.
 
 ## Project Configuration
 

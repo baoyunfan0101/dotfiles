@@ -1,6 +1,6 @@
 # Project Settings
 
-This reference describes development (`prepare`, `commit`, `push`) and explicitly authorized delivery (`merge`, `pr submit`, `pr merge`). Project settings are stored in:
+This reference describes repository workflow operations, including development, synchronization, and explicitly authorized delivery. Project settings are stored in:
 
 ```text
 <repository>/.ai/project.json
@@ -170,6 +170,8 @@ When disabled, development and delivery commands return `skip reason=workflow-di
 
 Controls synchronization during explicit branch continuation and local integration. Starting new work always fetches and fast-forwards its configured base. After a successful PR merge, the base is always fetched and fast-forwarded to the remote result.
 
+This setting does not control an explicit `git-workflow sync`; that command always fetches and permits only a fast-forward of the checked-out base.
+
 Default:
 
 ```json
@@ -301,6 +303,8 @@ A manually overridden commit is not automatically pushed.
 ## Git branches
 
 Start an independent task with `git-workflow prepare --base <base> --branch-name <name>`. This synchronizes the configured base and creates the new branch from its resulting HEAD. Use `git-workflow prepare --continue` only when intentionally continuing the checked-out working branch. The checked-out branch alone never establishes continuation intent. PR state does not control branch reuse. A working branch may contain multiple Task Specs and atomic commits when continuation is explicitly requested. A Task Spec does not authorize delivery. Delivery resolves its base when requested.
+
+Use `git-workflow sync` to update an existing, checked-out base branch from its configured remote tracking branch, such as after a PR has been merged remotely. The working tree must be clean. Sync fetches the remote state, fast-forwards the local base when possible, and succeeds without changing history when already current. It rejects ahead or diverged local history; it never merges or rebases. For a post-merge update, run `git-workflow branch switch main` and then `git-workflow sync`.
 
 In a genuinely empty repository, the configured base may be unborn. New work still requires explicit `--base` and `--branch-name`; `prepare` switches to the requested unborn working branch without creating a commit, and the first real commit is made there.
 
