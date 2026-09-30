@@ -66,6 +66,10 @@ Delivery                 -> explicit user authorization
 |---|---|
 | `git-workflow prepare --base <base> --branch-name <name>` | Start an independent task on a new branch from the synchronized base. |
 | `git-workflow prepare --continue` | Explicitly continue the checked-out working branch. |
+| `git-workflow backup create` | Save selected local changes as a persistent backup. |
+| `git-workflow backup list` | List workflow backups by stable ID. |
+| `git-workflow backup restore <id>` | Restore a backup while retaining it. |
+| `git-workflow backup delete <id>` | Delete one workflow backup. |
 | `git-workflow commit --message "<message>" -- <paths>...` | Record one atomic change. |
 | `git-workflow pr submit` | Create or update a PR when explicitly requested. |
 | `git-workflow pr merge` | Merge an existing PR when explicitly authorized. |

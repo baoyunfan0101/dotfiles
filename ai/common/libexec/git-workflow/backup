@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/backup.sh"
+
+backup_usage() {
+  cat <<'EOF'
+Usage:
+  git-workflow backup create
+  git-workflow backup list
+  git-workflow backup restore <id>
+  git-workflow backup delete <id>
+
+Backups use stable IDs returned by create or list. Restore keeps the backup;
+delete removes only the selected workflow backup.
+EOF
+}
+
+action="${1:-}"
+case "$action" in
+  -h|--help)
+    backup_usage
+    exit 0
+    ;;
+  create|list|restore|delete)
+    shift
+    ;;
+  *)
+    CURRENT_ACTION=backup
+    fail "unknown backup action: $action"
+    ;;
+esac
+
+CURRENT_ACTION="backup $action"
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  [[ $# -eq 1 ]] || fail "unexpected arguments after --help"
+  backup_usage
+  exit 0
+fi
+
+case "$action" in
+  create|list)
+    [[ $# -eq 0 ]] || fail "usage: git-workflow backup $action"
+    ;;
+  restore|delete)
+    [[ $# -eq 1 && "$1" != -* ]] || fail "usage: git-workflow backup $action <id>"
+    ;;
+esac
+
+preflight_core
+require_repository
+if ! project_workflow_enabled; then
+  printf '[git] backup %s skip reason=workflow-disabled\n' "$action"
+  exit 0
+fi
+
+case "$action" in
+  create)
+    load_backup_settings
+    BACKUP_OWNER=manual
+    create_backup
+    if [[ "$BACKUP_CREATED" != true ]]; then
+      printf '[git] backup create skip reason=no-selected-changes\n'
+      exit 0
+    fi
+    reapply_backup || fail "backup restore failed after creation; backup retained"
+    printf '[git] backup create ok id=%s method=%s\n' \
+      "$(backup_id "$BACKUP_SHA")" "$BACKUP_METHOD"
+    ;;
+  list)
+    list_backups
+    ;;
+  restore)
+    restore_backup_id "$1"
+    printf '[git] backup restore ok id=%s\n' "$1"
+    ;;
+  delete)
+    delete_backup_id "$1"
+    printf '[git] backup delete ok id=%s\n' "$1"
+    ;;
+esac

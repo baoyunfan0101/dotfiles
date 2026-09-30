@@ -16,7 +16,8 @@ COMMON = Path(__file__).resolve().parents[1]
 DEFAULT_SETTINGS = runpy.run_path(str(COMMON / "bin/agent-project"))["DEFAULT_SETTINGS"]
 GIT = shutil.which("git")
 BASH = shutil.which("bash")
-CORE_ACTIONS = ("prepare", "commit", "restore", "revert", "cherry-pick",
+CORE_ACTIONS = ("prepare", "backup create", "backup list", "backup restore",
+                "backup delete", "commit", "restore", "revert", "cherry-pick",
                 "rebase", "merge", "push", "remote connect", "remote reconnect",
                 "remote disconnect", "pr submit", "pr merge")
 
@@ -73,6 +74,10 @@ class PreflightTests(unittest.TestCase):
     def run_action(self, action, cwd=None):
         arguments = {
             "prepare": ["--base", "main", "--branch-name", "feat/test"],
+            "backup create": [],
+            "backup list": [],
+            "backup restore": ["b-" + "0" * 40],
+            "backup delete": ["b-" + "0" * 40],
             "commit": ["--message", "Change", "--all"],
             "restore": ["--", "tracked"],
             "revert": ["HEAD"],

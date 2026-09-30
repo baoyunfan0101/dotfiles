@@ -18,9 +18,9 @@
 
 ## Workflow
 
-Read-only Git commands may run directly. Do not directly run Git commands that modify the working tree, index, history, branches, or remote state. Use `git-workflow` for supported mutations; if an operation is unsupported, stop and report the workflow capability gap instead of bypassing it with raw Git.
+Read-only Git commands may run directly. Do not directly run Git commands that modify the working tree, index, history, branches, or remote state. Use `git-workflow` for supported mutations; if an operation is unsupported, stop and report the workflow capability gap instead of bypassing it with raw Git. Use `git-workflow backup create`, `backup restore <id>`, and `backup delete <id>` for backup mutations; use `backup list` to find stable IDs.
 
-Development: prepare -> edit -> commit*. Delivery requires explicit user authorization. Use `git-workflow --help` for syntax and options. Supported mutations: `prepare`, `commit`, `commit --amend`, `restore`, `revert`, `cherry-pick`, `rebase`, `push`, `branch create/switch/rename/delete`, `remote connect/reconnect/disconnect`, `merge`, `pr submit`, and `pr merge`.
+Development: prepare -> edit -> commit*. Delivery requires explicit user authorization. Use `git-workflow --help` for syntax and options. Supported mutations: `prepare`, `backup create/restore/delete`, `commit`, `commit --amend`, `restore`, `revert`, `cherry-pick`, `rebase`, `push`, `branch create/switch/rename/delete`, `remote connect/reconnect/disconnect`, `merge`, `pr submit`, and `pr merge`.
 
 For each new independent task, start a new branch from the configured base before editing:
 

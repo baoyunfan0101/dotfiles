@@ -145,6 +145,7 @@ prepare_from_base() {
   if ! reapply_backup; then
     restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "$created_branch" false "backup restore failed; backup retained"
   fi
+  cleanup_prepare_backup
 }
 
 print_prepare_result() {
@@ -193,7 +194,8 @@ prepare() {
     fi
     fail "sync failed; original branch and protected changes were restored"
   fi
-  reapply_backup
+  reapply_backup || fail "backup restore failed; backup retained"
+  cleanup_prepare_backup
 
   WORKING_BRANCH="$(current_branch)"
   print_prepare_result

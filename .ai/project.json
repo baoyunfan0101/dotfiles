@@ -10,7 +10,8 @@
     },
     "backup": {
       "mode": "all",
-      "method": "stash"
+      "method": "stash",
+      "deleteAfterRestore": false
     },
     "commit": {
       "mode": "automatic"

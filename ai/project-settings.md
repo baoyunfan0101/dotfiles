@@ -77,7 +77,8 @@ Single-setting `set` and `unset` remain supported. An agent can translate a natu
     },
     "backup": {
       "mode": "all",
-      "method": "stash"
+      "method": "stash",
+      "deleteAfterRestore": false
     },
     "commit": {
       "mode": "automatic"
@@ -216,7 +217,7 @@ Before synchronization or branch creation, `git-workflow prepare` can preserve l
 
 ### `git.backup.mode`
 
-Controls which local changes are included in the backup.
+Controls which local changes are included in backups created by `prepare` or `git-workflow backup create`.
 
 Default:
 
@@ -250,7 +251,15 @@ Supported values:
 | Value | Meaning |
 |---|---|
 | `"stash"` | Store the backup as a Git stash. The backup stash remains available after the changes are reapplied. |
-| `"commit"` | Store the backup as a commit referenced under `refs/agent-workflow/backups/`. A temporary stash transports working-tree changes during `git-workflow prepare`. |
+| `"commit"` | Store the backup as a commit referenced under `refs/agent-workflow/backups/`. A temporary stash transports working-tree changes and is removed after successful restoration. |
+
+### `git.backup.deleteAfterRestore`
+
+Default: `false`.
+
+When `true`, `prepare` deletes only its own persistent backup after protected changes are successfully restored. Failed operations retain the backup. Manually created backups are never automatically deleted. Existing project configurations without this setting use `false` until updated.
+
+Use `git-workflow backup create` to save selected changes without starting branch preparation. `backup list` returns stable IDs for both storage methods. `backup restore <id>` restores a backup while retaining it; `backup delete <id>` removes only that backup. The commands accept workflow backup IDs, not positional stash references.
 
 This setting has no effect when:
 

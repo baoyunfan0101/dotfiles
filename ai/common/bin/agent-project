@@ -28,6 +28,9 @@ SETTING_SPECS = {
     "git.backup.method": {"type": str, "default": "stash",
                           "values": {"stash", "commit"},
                           "description": "How selected local changes are protected."},
+    "git.backup.deleteAfterRestore": {
+        "type": bool, "default": False,
+        "description": "Delete a prepare-owned backup after successful restoration."},
     "git.commit.mode": {"type": str, "default": "automatic",
                         "values": {"manual", "automatic"},
                         "description": "Whether workflow commits and pushes are automatic."},
@@ -227,6 +230,11 @@ def load_settings():
         fail(f"invalid JSON in {path}: {error}")
     except OSError as error:
         fail(f"cannot read {path}: {error}")
+
+    git_settings = settings.get("git") if isinstance(settings, dict) else None
+    backup = git_settings.get("backup") if isinstance(git_settings, dict) else None
+    if isinstance(backup, dict) and "deleteAfterRestore" not in backup:
+        backup["deleteAfterRestore"] = False
 
     validate_structure(settings, SCHEMA)
     validate_values(settings)

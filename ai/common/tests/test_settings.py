@@ -69,6 +69,7 @@ class SettingsTests(unittest.TestCase):
         for meaning in ("Read-only Git commands may run directly", "Do not directly run Git commands",
                         "workflow capability gap", "prepare --base <base> --branch-name <name>",
                         "prepare --continue",
+                        "backup create", "backup restore <id>", "backup delete <id>",
                         "commit --amend", "restore", "revert", "cherry-pick", "rebase"):
             self.assertIn(meaning, instructions)
         self.assertNotIn("git.integration.mode", instructions)
@@ -246,13 +247,30 @@ class SettingsTests(unittest.TestCase):
             "workflow": {"enabled": False},
             "git": {
                 "sync": {"mode": "update", "updateMethod": "ffOnly"},
-                "backup": {"mode": "all", "method": "stash"},
+                "backup": {"mode": "all", "method": "stash",
+                           "deleteAfterRestore": False},
                 "commit": {"mode": "automatic"},
                 "branch": {"baseBranches": ["main"],
                            "deleteAfterIntegration": False},
                 "integration": {"mode": "localMerge", "mergeMethod": "mergeCommit"},
             },
         })
+
+    def test_existing_config_without_backup_cleanup_setting_uses_false(self):
+        old = deepcopy(self.defaults)
+        del old["git"]["backup"]["deleteAfterRestore"]
+        self.write_config(old, complete=False)
+        result = self.run_project("get", "git.backup.deleteAfterRestore")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "false")
+        self.assertNotIn("deleteAfterRestore", self.config.read_text())
+
+    def test_backup_cleanup_setting_is_boolean_and_defaults_false(self):
+        result = self.run_project("schema", "git.backup.deleteAfterRestore")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        entry = json.loads(result.stdout)
+        self.assertEqual(entry["type"], "boolean")
+        self.assertIs(entry["default"], False)
 
     def test_existing_project_ignores_changed_global_defaults(self):
         self.write_config({"workflow": {"enabled": True}})

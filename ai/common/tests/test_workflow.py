@@ -278,7 +278,7 @@ class WorkflowTests(unittest.TestCase):
     def test_command_help_and_dispatch(self):
         help_text = self.run_cli("--help").stdout
         self.assertEqual(set(re.findall(r"^  ([a-z][a-z-]*)$", help_text, re.MULTILINE)),
-                         {"prepare", "commit", "restore", "revert", "cherry-pick",
+                         {"prepare", "backup", "commit", "restore", "revert", "cherry-pick",
                           "rebase", "merge", "push", "branch", "remote", "pr"})
         for meaning in ("before editing", "after editing", "--message MESSAGE",
                         "-- PATH...", "outside commit", "current branch",
@@ -296,6 +296,8 @@ class WorkflowTests(unittest.TestCase):
                          {"create", "switch", "rename", "delete"})
         for action in ("create", "switch", "rename", "delete"):
             self.assertIn("Usage:", self.run_cli("branch", action, "--help").stdout)
+        for action in ("create", "list", "restore", "delete"):
+            self.assertIn("Usage:", self.run_cli("backup", action, "--help").stdout)
         for command in ("start", "finish", "add", "stash", "pull", "checkout",
                         "switch", "reset"):
             self.assertIn("unknown command", self.run_cli(command, ok=False).stderr)
@@ -310,6 +312,9 @@ class WorkflowTests(unittest.TestCase):
 
         for action, arguments in (
             ("prepare", ("--base", "main", "--branch-name", "feat/test")),
+            ("backup", ("create",)),
+            ("backup", ("restore", "b-" + "0" * 40)),
+            ("backup", ("delete", "b-" + "0" * 40)),
             ("commit", ("--message", "Change", "--all")),
             ("push", ()),
             ("branch", ("create", "feat/disabled")),
@@ -320,11 +325,11 @@ class WorkflowTests(unittest.TestCase):
             result = self.run_cli(action, *arguments)
             self.assertEqual(
                 result.stdout,
-                f"[git] {action + ' ' + arguments[0] if action in ('pr', 'branch') else action} skip reason=workflow-disabled\n",
+                f"[git] {action + ' ' + arguments[0] if action in ('pr', 'branch', 'backup') else action} skip reason=workflow-disabled\n",
             )
 
     def test_command_executables(self):
-        for action in ("prepare", "commit", "restore", "revert", "cherry-pick",
+        for action in ("prepare", "backup", "commit", "restore", "revert", "cherry-pick",
                        "rebase", "merge", "push", "branch", "remote", "pr"):
             path = COMMON / "libexec/git-workflow" / action
             self.assertTrue(os.access(path, os.X_OK))
@@ -365,13 +370,15 @@ class WorkflowTests(unittest.TestCase):
         )
 
         installed = destination / ".local/bin/git-workflow"
-        for command in ("prepare", "commit", "restore", "revert", "cherry-pick",
+        for command in ("prepare", "backup", "commit", "restore", "revert", "cherry-pick",
                         "rebase", "push", "branch", "remote", "merge", "pr"):
             self.assertTrue(os.access(destination / ".local/libexec/git-workflow" / command, os.X_OK))
         for command in ("start", "finish"):
             self.assertFalse((destination / ".local/libexec/git-workflow" / command).exists())
         for action in ("submit", "merge"):
             self.assertIn("Usage:", self.run_cli("pr", action, "--help", executable=installed).stdout)
+        for action in ("create", "list", "restore", "delete"):
+            self.assertIn("Usage:", self.run_cli("backup", action, "--help", executable=installed).stdout)
         self.assertIn("[git] prepare ok", self.run_cli("prepare", "--base", "main", "--branch-name", "feat/test", executable=installed).stdout)
         for action in ("connect", "reconnect", "disconnect"):
             self.assertIn("Usage:", self.run_cli("remote", action, "--help", executable=installed).stdout)
