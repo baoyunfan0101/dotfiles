@@ -24,7 +24,7 @@ SETTING_SPECS = {
                               "description": "How an upstream update is applied."},
     "git.backup.mode": {"type": str, "default": "all",
                         "values": {"none", "tracked", "untracked", "all"},
-                        "description": "Local changes protected during repository preparation."},
+                        "description": "Local changes backed up and discarded before repository preparation."},
     "git.backup.method": {"type": str, "default": "stash",
                           "values": {"stash", "commit"},
                           "description": "How selected local changes are protected."},

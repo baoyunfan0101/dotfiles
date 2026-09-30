@@ -278,7 +278,7 @@ class WorkflowTests(unittest.TestCase):
     def test_command_help_and_dispatch(self):
         help_text = self.run_cli("--help").stdout
         self.assertEqual(set(re.findall(r"^  ([a-z][a-z-]*)$", help_text, re.MULTILINE)),
-                         {"prepare", "commit", "restore", "revert", "cherry-pick",
+                         {"prepare", "backup", "commit", "restore", "revert", "cherry-pick",
                           "rebase", "merge", "push", "branch", "remote", "pr"})
         for meaning in ("before editing", "after editing", "--message MESSAGE",
                         "-- PATH...", "outside commit", "current branch",
@@ -296,6 +296,8 @@ class WorkflowTests(unittest.TestCase):
                          {"create", "switch", "rename", "delete"})
         for action in ("create", "switch", "rename", "delete"):
             self.assertIn("Usage:", self.run_cli("branch", action, "--help").stdout)
+        for action in ("create", "list", "apply", "delete"):
+            self.assertIn("Usage:", self.run_cli("backup", action, "--help").stdout)
         for command in ("start", "finish", "add", "stash", "pull", "checkout",
                         "switch", "reset"):
             self.assertIn("unknown command", self.run_cli(command, ok=False).stderr)
@@ -310,6 +312,9 @@ class WorkflowTests(unittest.TestCase):
 
         for action, arguments in (
             ("prepare", ("--base", "main", "--branch-name", "feat/test")),
+            ("backup", ("create",)),
+            ("backup", ("apply", "b-" + "0" * 40)),
+            ("backup", ("delete", "b-" + "0" * 40)),
             ("commit", ("--message", "Change", "--all")),
             ("push", ()),
             ("branch", ("create", "feat/disabled")),
@@ -320,11 +325,11 @@ class WorkflowTests(unittest.TestCase):
             result = self.run_cli(action, *arguments)
             self.assertEqual(
                 result.stdout,
-                f"[git] {action + ' ' + arguments[0] if action in ('pr', 'branch') else action} skip reason=workflow-disabled\n",
+                f"[git] {action + ' ' + arguments[0] if action in ('pr', 'branch', 'backup') else action} skip reason=workflow-disabled\n",
             )
 
     def test_command_executables(self):
-        for action in ("prepare", "commit", "restore", "revert", "cherry-pick",
+        for action in ("prepare", "backup", "commit", "restore", "revert", "cherry-pick",
                        "rebase", "merge", "push", "branch", "remote", "pr"):
             path = COMMON / "libexec/git-workflow" / action
             self.assertTrue(os.access(path, os.X_OK))
@@ -365,13 +370,15 @@ class WorkflowTests(unittest.TestCase):
         )
 
         installed = destination / ".local/bin/git-workflow"
-        for command in ("prepare", "commit", "restore", "revert", "cherry-pick",
+        for command in ("prepare", "backup", "commit", "restore", "revert", "cherry-pick",
                         "rebase", "push", "branch", "remote", "merge", "pr"):
             self.assertTrue(os.access(destination / ".local/libexec/git-workflow" / command, os.X_OK))
         for command in ("start", "finish"):
             self.assertFalse((destination / ".local/libexec/git-workflow" / command).exists())
         for action in ("submit", "merge"):
             self.assertIn("Usage:", self.run_cli("pr", action, "--help", executable=installed).stdout)
+        for action in ("create", "list", "apply", "delete"):
+            self.assertIn("Usage:", self.run_cli("backup", action, "--help", executable=installed).stdout)
         self.assertIn("[git] prepare ok", self.run_cli("prepare", "--base", "main", "--branch-name", "feat/test", executable=installed).stdout)
         for action in ("connect", "reconnect", "disconnect"):
             self.assertIn("Usage:", self.run_cli("remote", action, "--help", executable=installed).stdout)
@@ -714,18 +721,23 @@ class WorkflowTests(unittest.TestCase):
                     self.change()
                     self.git("add", "tracked")
                     self.change("other")
-                    status = self.git("status", "--porcelain")
                     branch = f"feat/backup-{mode}-{method}"
                     result = self.run_cli("prepare", "--base", "main", "--branch-name", branch)
                     self.assertIn(f"backup={method if mode != 'none' else 'none'}", result.stdout)
-                    self.assertEqual(self.git("status", "--porcelain"), status)
-                    self.assertEqual((self.repo / "tracked").read_text(), "changed\n")
-                    self.assertEqual((self.repo / "other").read_text(), "changed\n")
+                    tracked_selected = mode in ("tracked", "all")
+                    untracked_selected = mode in ("untracked", "all")
+                    self.assertEqual((self.repo / "tracked").read_text(),
+                                     "original\n" if tracked_selected else "changed\n")
+                    self.assertEqual(bool(self.git("diff", "--cached", "--name-only")),
+                                     not tracked_selected)
+                    self.assertEqual((self.repo / "other").exists(), not untracked_selected)
+                    if not untracked_selected:
+                        self.assertEqual((self.repo / "other").read_text(), "changed\n")
                     if mode != "none":
                         refs = "refs/stash" if method == "stash" else "refs/agent-workflow/backups/"
                         self.assertTrue(self.git("for-each-ref", "--format=%(refname)", refs))
                     self.git("restore", "--staged", "--worktree", "tracked")
-                    (self.repo / "other").unlink()
+                    (self.repo / "other").unlink(missing_ok=True)
                     self.git("switch", "main")
 
     def test_prepare_bootstraps_unborn_base_and_preserves_files(self):
@@ -1302,8 +1314,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", "HEAD"), remote_tip)
         self.assertEqual(self.git("rev-parse", "main"), remote_tip)
         self.assertEqual(self.git("rev-parse", "feat/test"), old_branch_head)
-        self.assertEqual((self.repo / "user-note").read_text(), "protected\n")
-        self.assertIn("user-note", self.git("status", "--porcelain"))
+        self.assertFalse((self.repo / "user-note").exists())
+        self.assertTrue(self.git("stash", "list"))
+        self.assertEqual(self.git("status", "--porcelain"), "")
 
     def test_prepare_explicit_base_starts_from_latest_base_when_sync_none(self):
         self.assert_prepare_explicit_base_starts_from_latest_base("none")
@@ -1342,11 +1355,12 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", "HEAD"), working_head)
         self.assertEqual(self.git("rev-parse", "main"), base_head)
         self.assertEqual(self.git("ls-remote", "--heads", "origin", "main"), remote_head)
-        self.assertEqual((self.repo / "user-note").read_text(), "protected\n")
+        self.assertFalse((self.repo / "user-note").exists())
+        self.assertTrue(self.git("stash", "list"))
         self.assertEqual(self.git("branch", "--list", "feat/next"), "")
         self.assert_no_in_progress_git_operation()
 
-    def test_prepare_explicit_base_fetch_and_update_failures_restore_changes(self):
+    def test_prepare_explicit_base_fetch_and_update_failures_retain_backup(self):
         self.save_settings(sync={"mode": "none"})
         self.git("push", "-q", "origin", "main")
         self.prepare()
@@ -1355,10 +1369,6 @@ class WorkflowTests(unittest.TestCase):
         remote_tip = self.git("--git-dir", str(self.remote), "commit-tree",
                               "main^{tree}", "-p", base_head, "-m", "Remote base advance")
         self.git("--git-dir", str(self.remote), "update-ref", "refs/heads/main", remote_tip)
-        self.change()
-        self.git("add", "tracked")
-        (self.repo / "user-note").write_text("protected\n")
-        original_status = self.git("status", "--porcelain")
         git_executable = shutil.which("git")
         git_stub = self.bin / "git"
 
@@ -1367,6 +1377,9 @@ class WorkflowTests(unittest.TestCase):
             ("update", '"$1" == merge && "$2" == --quiet && "$3" == --ff-only'),
         ):
             with self.subTest(operation=operation):
+                self.change()
+                self.git("add", "tracked")
+                (self.repo / "user-note").write_text("protected\n")
                 git_stub.write_text('#!/usr/bin/env bash\n'
                                     f'if [[ {condition} ]]; then exit 1; fi\n'
                                     f'exec "{git_executable}" "$@"\n')
@@ -1376,13 +1389,15 @@ class WorkflowTests(unittest.TestCase):
                 self.assertEqual(self.git("branch", "--show-current"), "feat/test")
                 self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
                 self.assertEqual(self.git("rev-parse", "main"), base_head)
-                self.assertEqual(self.git("status", "--porcelain"), original_status)
-                self.assertEqual((self.repo / "tracked").read_text(), "changed\n")
-                self.assertEqual((self.repo / "user-note").read_text(), "protected\n")
+                self.assertEqual(self.git("status", "--porcelain"), "")
+                self.assertIn("backup retained", result.stderr)
+                self.assertEqual((self.repo / "tracked").read_text(), "original\n")
+                self.assertFalse((self.repo / "user-note").exists())
+                self.assertTrue(self.git("stash", "list"))
                 self.assertEqual(self.git("branch", "--list", "feat/next"), "")
                 self.assert_no_in_progress_git_operation()
 
-    def test_prepare_explicit_base_retains_backup_on_restore_failure(self):
+    def test_prepare_explicit_base_never_applies_backup(self):
         self.save_settings(sync={"mode": "none"})
         self.prepare()
         (self.repo / "user-note").write_text("protected\n")
@@ -1394,14 +1409,15 @@ class WorkflowTests(unittest.TestCase):
         git_stub.chmod(0o755)
         original_head = self.git("rev-parse", "HEAD")
 
-        result = self.run_cli("prepare", "--base", "main", "--branch-name", "feat/next", ok=False)
-        self.assertIn("backup retained", result.stderr)
-        self.assertEqual(self.git("branch", "--show-current"), "feat/test")
+        result = self.run_cli("prepare", "--base", "main", "--branch-name", "feat/next")
+        self.assertIn("branch=feat/next created=true", result.stdout)
+        self.assertEqual(self.git("branch", "--show-current"), "feat/next")
         self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
-        self.assertEqual(self.git("branch", "--list", "feat/next"), "")
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertFalse((self.repo / "user-note").exists())
         self.assertTrue(self.git("stash", "list"))
 
-    def test_prepare_explicit_base_branch_creation_failure_restores_changes(self):
+    def test_prepare_explicit_base_branch_creation_failure_retains_backup(self):
         self.save_settings(sync={"mode": "none"})
         self.prepare()
         original_head = self.git("rev-parse", "HEAD")
@@ -1417,7 +1433,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("branch creation failed", result.stderr)
         self.assertEqual(self.git("branch", "--show-current"), "feat/test")
         self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
-        self.assertEqual((self.repo / "user-note").read_text(), "protected\n")
+        self.assertFalse((self.repo / "user-note").exists())
+        self.assertTrue(self.git("stash", "list"))
         self.assertEqual(self.git("branch", "--list", "feat/next"), "")
         self.assert_no_in_progress_git_operation()
 
@@ -1496,8 +1513,8 @@ class WorkflowTests(unittest.TestCase):
         self.git("push", "-q", "origin", "main")
         self.prepare()
         for subject in ("Commit A", "Commit B", "Commit C"):
-            (self.repo / "tracked").write_text(subject)
             self.run_cli("prepare", "--continue")
+            (self.repo / "tracked").write_text(subject)
             self.run_cli("commit", "--message", subject, "--", "tracked")
         self.assertEqual(self.gh_calls(), [])
         self.assertIn("url=https://example.invalid/pr/1", self.run_cli("pr", "submit").stdout)

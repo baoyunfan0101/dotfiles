@@ -69,6 +69,7 @@ class SettingsTests(unittest.TestCase):
         for meaning in ("Read-only Git commands may run directly", "Do not directly run Git commands",
                         "workflow capability gap", "prepare --base <base> --branch-name <name>",
                         "prepare --continue",
+                        "backup create", "backup apply <id>", "backup delete <id>",
                         "commit --amend", "restore", "revert", "cherry-pick", "rebase"):
             self.assertIn(meaning, instructions)
         self.assertNotIn("git.integration.mode", instructions)

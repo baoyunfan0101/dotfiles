@@ -100,7 +100,7 @@ Single-setting `set` and `unset` remain supported. An agent can translate a natu
 |---|---|
 | `workflow` | Whether this repository uses `git-workflow`. |
 | `git.sync` | Repository synchronization during `prepare` and local integration. |
-| `git.backup` | Protect local changes during `prepare`. |
+| `git.backup` | Save selected local changes before discarding them. |
 | `git.commit` | Commit and push policy. |
 | `git.branch` | Allowed bases and branch cleanup after integration. |
 | `git.integration` | Local integration or pull-request delivery, and merge method. |
@@ -212,11 +212,11 @@ This setting has no effect when `git.sync.mode` is `"none"` or `"fetch"`.
 
 ## Git backup
 
-Before synchronization or branch creation, `git-workflow prepare` can preserve local changes and then restore them afterward.
+Before synchronization or branch creation, `git-workflow prepare` saves and verifies a persistent local backup, then discards the selected changes. It does not automatically apply backups, even if preparation later fails. An unborn repository has no commit to back up against; its initial preparation retains files until an initial commit exists.
 
 ### `git.backup.mode`
 
-Controls which local changes are included in the backup.
+Controls which local changes are backed up and discarded by `prepare` or `git-workflow backup create`.
 
 Default:
 
@@ -228,7 +228,7 @@ Supported values:
 
 | Value | Meaning |
 |---|---|
-| `"none"` | Do not create a backup. |
+| `"none"` | Do not create a backup or discard changes. |
 | `"tracked"` | Back up modifications to tracked files. |
 | `"untracked"` | Back up untracked files. |
 | `"all"` | Back up both tracked changes and untracked files. |
@@ -249,8 +249,12 @@ Supported values:
 
 | Value | Meaning |
 |---|---|
-| `"stash"` | Store the backup as a Git stash. The backup stash remains available after the changes are reapplied. |
-| `"commit"` | Store the backup as a commit referenced under `refs/agent-workflow/backups/`. A temporary stash transports working-tree changes during `git-workflow prepare`. |
+| `"stash"` | Store a persistent Git stash, including selected staging state and untracked files. |
+| `"commit"` | Store the selected working-file snapshot as a commit with the current HEAD as its sole parent, under `refs/agent-workflow/backups/`. Applying its diff stages the saved changes. |
+
+`git-workflow backup create` saves and verifies a backup before discarding only the selected changes. Unselected and ignored files remain untouched. `backup list` returns stable IDs for both methods. `backup apply <id>` explicitly applies old changes onto the current branch and HEAD, retaining the backup even on conflicts. `backup delete <id>` deletes only the selected backup. Backups remain local and are not pushed or synchronized.
+
+Both manual creation and `prepare` use the same backup mechanism. Backups remain until explicitly deleted. Creation or verification failure leaves selected changes in place. For commit backups, staged-only intermediate versions are not separate saved states; the snapshot contains the selected working-file contents. Git stash backups preserve the selected index state as well.
 
 This setting has no effect when:
 
