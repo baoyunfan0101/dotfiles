@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+
+CURRENT_ACTION="sync"
+
+case "${1:-}" in
+  -h|--help)
+    [[ $# -eq 1 ]] || fail "usage: git-workflow sync"
+    usage
+    exit 0
+    ;;
+  "") ;;
+  *) fail "usage: git-workflow sync" ;;
+esac
+
+preflight_core
+require_repository
+if ! project_workflow_enabled; then
+  printf '[git] sync skip reason=workflow-disabled\n'
+  exit 0
+fi
+
+branch="$(current_branch)"
+BASE_BRANCHES_JSON="$(setting git.branch.baseBranches)"
+is_base_branch "$branch" || fail "current branch is not a configured base branch: $branch"
+has_local_changes && fail "working tree has local changes"
+
+remote="$(git config --get "branch.$branch.remote" || true)"
+merge_ref="$(git config --get "branch.$branch.merge" || true)"
+[[ -n "$remote" && "$remote" != "." && -n "$merge_ref" ]] ||
+  fail "current base branch has no usable remote tracking configuration: $branch"
+[[ "$merge_ref" == refs/heads/* ]] && git check-ref-format "$merge_ref" ||
+  fail "current base branch has an invalid remote tracking branch: $branch"
+git remote get-url "$remote" >/dev/null 2>&1 ||
+  fail "configured tracking remote is unavailable: $remote"
+
+original_head="$(git rev-parse --verify 'HEAD^{commit}')" || fail "current base branch has no commit: $branch"
+git fetch --quiet "$remote" "$merge_ref" || fail "cannot fetch tracked remote branch: $remote/$merge_ref"
+remote_head="$(git rev-parse --verify 'FETCH_HEAD^{commit}')" || fail "fetched remote branch has no commit: $remote/$merge_ref"
+
+if [[ "$original_head" == "$remote_head" ]]; then
+  result="up-to-date"
+else
+  git merge-base --is-ancestor "$original_head" "$remote_head" ||
+    fail "cannot fast-forward base branch; local history is ahead of or diverged from $remote/$merge_ref"
+  git merge --quiet --ff-only "$remote_head" || fail "fast-forward update failed: $branch"
+  [[ "$(git rev-parse HEAD)" == "$remote_head" ]] || fail "fast-forward verification failed: $branch"
+  result="updated"
+fi
+
+printf '[git] sync ok branch=%s result=%s sha=%s\n' "$branch" "$result" "${remote_head:0:7}"

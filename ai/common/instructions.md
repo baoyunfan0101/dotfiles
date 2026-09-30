@@ -22,7 +22,7 @@ Read-only Git commands may run directly. Do not directly run Git commands that m
 
 Use `git-workflow backup create` to preserve selected local changes before discarding them. Use `backup list` to inspect workflow backups, `backup apply <id>` only when the user explicitly wants to recover old changes, and `backup delete <id>` when the user explicitly wants to remove a backup. `prepare` backs up and discards selected changes; it never automatically applies a backup.
 
-Development: prepare -> edit -> commit*. Delivery requires explicit user authorization. Use `git-workflow --help` for syntax and options. Supported mutations: `prepare`, `backup create/apply/delete`, `commit`, `commit --amend`, `restore`, `revert`, `cherry-pick`, `rebase`, `push`, `branch create/switch/rename/delete`, `remote connect/reconnect/disconnect`, `merge`, `pr submit`, and `pr merge`.
+Development: prepare -> edit -> commit*. Delivery requires explicit user authorization. Use `git-workflow --help` for syntax and options. Supported mutations: `prepare`, `sync`, `backup create/apply/delete`, `commit`, `commit --amend`, `restore`, `revert`, `cherry-pick`, `rebase`, `push`, `branch create/switch/rename/delete`, `remote connect/reconnect/disconnect`, `merge`, `pr submit`, and `pr merge`.
 
 For each new independent task, start a new branch from the configured base before editing:
 
@@ -31,6 +31,8 @@ git-workflow prepare --base <base> --branch-name <name>
 ```
 
 To explicitly continue work already assigned to the checked-out working branch, run `git-workflow prepare --continue`. The checked-out branch alone does not establish continuation intent. This also applies when it has no PR or its PR is open, closed, or merged. An open PR can be updated with further commits and pushes after explicit continuation.
+
+To update an existing local base branch after remote changes, switch to it with `git-workflow branch switch <base>` and run `git-workflow sync`. Sync requires a clean working tree and remote tracking configuration, and advances the base only by fast-forward. It does not start or continue development work.
 
 If `prepare` reports `workflow-disabled`, do not use further workflow commands for that work.
 
