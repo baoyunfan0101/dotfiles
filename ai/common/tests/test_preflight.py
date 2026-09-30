@@ -224,18 +224,37 @@ class PreflightTests(unittest.TestCase):
                                         "fix .ai/project.json and run agent-project effective", action)
 
     def test_missing_core_commands(self):
-        for command in ("git", "python3", "agent-project"):
+        for command in ("git", "python3"):
             with self.subTest(command=command):
                 path = self.bin / command
                 hidden = self.root / command
                 path.rename(hidden)
                 try:
-                    fix = ("re-run the dotfiles AI installer" if command == "agent-project"
-                           else f"install {command} and ensure it is on PATH")
                     for action in CORE_ACTIONS:
-                        self.assert_blocked(command, "command not found", "core", fix, action)
+                        self.assert_blocked(command, "command not found", "core",
+                                            f"install {command} and ensure it is on PATH", action)
                 finally:
                     hidden.rename(path)
+
+    def test_agent_project_works_without_bin_on_path(self):
+        (self.bin / "agent-project").unlink()
+        self.assert_ready()
+
+    def test_agent_project_missing_from_installation(self):
+        (self.bin / "agent-project").unlink()
+        installation = self.root / "installation"
+        shutil.copytree(COMMON, installation, ignore=shutil.ignore_patterns("tests"))
+        (installation / "bin/agent-project").unlink()
+        result = subprocess.run(
+            [BASH, str(installation / "bin/git-workflow"), "prepare",
+             "--base", "main", "--branch-name", "feat/test"],
+            cwd=self.repo, env={**self.env, "PATH": str(self.bin)},
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr,
+                         '[git] prepare error check=agent-project reason="command not found" '
+                         'required-by=core fix="re-run the dotfiles AI installer"\n')
 
     def test_repository_validation_does_not_repeat_dependency_lookup(self):
         lookups = self.root / "lookups.log"
