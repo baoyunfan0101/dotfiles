@@ -2,7 +2,6 @@ WORKFLOW_ENABLED=""
 COMMIT_MODE=""
 INTEGRATION_MODE=""
 BASE_BRANCHES_JSON="[]"
-BACKUP_DELETE_AFTER_RESTORE=false
 
 is_base_branch() {
   local branch="$1"
@@ -33,7 +32,6 @@ load_prepare_settings() {
 load_backup_settings() {
   BACKUP_MODE="$(setting git.backup.mode)"
   BACKUP_METHOD="$(setting git.backup.method)"
-  BACKUP_DELETE_AFTER_RESTORE="$(setting git.backup.deleteAfterRestore)"
 }
 
 load_commit_settings() {

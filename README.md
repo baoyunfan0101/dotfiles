@@ -66,9 +66,9 @@ Delivery                 -> explicit user authorization
 |---|---|
 | `git-workflow prepare --base <base> --branch-name <name>` | Start an independent task on a new branch from the synchronized base. |
 | `git-workflow prepare --continue` | Explicitly continue the checked-out working branch. |
-| `git-workflow backup create` | Save selected local changes as a persistent backup. |
+| `git-workflow backup create` | Verify a persistent local backup, then discard the selected changes. |
 | `git-workflow backup list` | List workflow backups by stable ID. |
-| `git-workflow backup restore <id>` | Restore a backup while retaining it. |
+| `git-workflow backup apply <id>` | Apply old changes to the current state while retaining the backup. |
 | `git-workflow backup delete <id>` | Delete one workflow backup. |
 | `git-workflow commit --message "<message>" -- <paths>...` | Record one atomic change. |
 | `git-workflow pr submit` | Create or update a PR when explicitly requested. |
@@ -78,6 +78,8 @@ Delivery                 -> explicit user authorization
 | `git-workflow remote connect <url>` | Connect the local repository to a remote repository. |
 | `git-workflow remote reconnect <url>` | Change the existing remote repository connection. |
 | `git-workflow remote disconnect` | Remove the existing remote repository connection. |
+
+`prepare` verifies a persistent local backup before discarding selected changes. It never automatically applies or deletes that backup, including on failure. Use `backup apply <id>` only for explicit recovery onto the current working state.
 
 A working branch may contain multiple Task Specs and atomic commits. Task completion, PR submission, and CI success do not authorize merging. PR metadata covers all commits from base to working branch. If `prepare` reports `workflow-disabled`, stop using workflow commands for that work. See `git-workflow --help` and `git-workflow pr --help`.
 

@@ -68,31 +68,33 @@ parse_prepare_args() {
   fi
 }
 
+prepare_failure() {
+  if [[ "$BACKUP_CREATED" == true ]]; then
+    fail "$1; backup retained id=$(backup_id "$BACKUP_SHA")"
+  fi
+  fail "$1"
+}
+
 restore_failed_base_entry() {
   local original_branch="$1"
   local base_branch="$2"
   local base_head="$3"
   local created_branch="$4"
-  local restore_backup="$5"
-  local reason="$6"
+  local reason="$5"
 
   if [[ -n "$created_branch" ]]; then
     if [[ "$(current_branch)" == "$created_branch" ]]; then
-      git reset --hard --quiet || fail "$reason; could not clear failed branch state; backup retained"
-      git checkout -q "$base_branch" || fail "$reason; could not return to base; backup retained"
+      git checkout -q "$base_branch" || prepare_failure "$reason; could not return to base"
     fi
-    git branch -D "$created_branch" >/dev/null || fail "$reason; could not remove incomplete branch; backup retained"
+    git branch -D "$created_branch" >/dev/null || prepare_failure "$reason; could not remove incomplete branch"
   fi
   if [[ "$(current_branch)" == "$base_branch" && "$(git rev-parse HEAD)" != "$base_head" ]]; then
-    git reset --hard --quiet "$base_head" || fail "$reason; could not restore base HEAD; backup retained"
+    git reset --keep --quiet "$base_head" || prepare_failure "$reason; could not restore base HEAD"
   fi
   if [[ "$(current_branch)" != "$original_branch" ]]; then
-    git checkout -q "$original_branch" || fail "$reason; could not restore original branch; backup retained"
+    git checkout -q "$original_branch" || prepare_failure "$reason; could not restore original branch"
   fi
-  if [[ "$restore_backup" == true ]]; then
-    reapply_backup || fail "$reason; protected changes could not be restored; backup retained"
-  fi
-  fail "$reason; original branch was restored"
+  prepare_failure "$reason; original branch was restored"
 }
 
 prepare_from_base() {
@@ -120,32 +122,27 @@ prepare_from_base() {
 
   create_backup
   if ! base_remote="$(remote_for_branch "$PREPARE_BASE")"; then
-    restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "" true "base remote resolution failed"
+    restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "" "base remote resolution failed"
   fi
   if ! base_ref="$(fetch_base_for_entry "$PREPARE_BASE" "$base_remote")"; then
-    restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "" true "base fetch failed"
+    restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "" "base fetch failed"
   fi
   if ! git merge-base --is-ancestor "$base_head" "$base_ref"; then
-    restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "" true "local base diverged from fetched remote base: $PREPARE_BASE"
+    restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "" "local base diverged from fetched remote base: $PREPARE_BASE"
   fi
   if ! git checkout -q "$PREPARE_BASE"; then
-    restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "" true "base checkout failed"
+    restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "" "base checkout failed"
   fi
   if ! advance_base_for_entry "$PREPARE_BASE" "$base_ref"; then
-    restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "" true "base update failed"
+    restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "" "base update failed"
   fi
   if ! branch_checkout_new "$BRANCH_NAME"; then
     if branch_exists_local "$BRANCH_NAME"; then
       created_branch="$BRANCH_NAME"
     fi
-    restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "$created_branch" true "branch creation failed"
+    restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "$created_branch" "branch creation failed"
   fi
-  created_branch="$BRANCH_NAME"
   BRANCH_CREATED=true
-  if ! reapply_backup; then
-    restore_failed_base_entry "$original_branch" "$PREPARE_BASE" "$base_head" "$created_branch" false "backup restore failed; backup retained"
-  fi
-  cleanup_prepare_backup
 }
 
 print_prepare_result() {
@@ -189,13 +186,8 @@ prepare() {
 
   create_backup
   if ! sync_current_branch "$ORIGINAL_BRANCH"; then
-    if ! reapply_backup; then
-      fail "sync failed and protected changes could not be restored; backup was retained"
-    fi
-    fail "sync failed; original branch and protected changes were restored"
+    prepare_failure "sync failed; original branch was retained"
   fi
-  reapply_backup || fail "backup restore failed; backup retained"
-  cleanup_prepare_backup
 
   WORKING_BRANCH="$(current_branch)"
   print_prepare_result

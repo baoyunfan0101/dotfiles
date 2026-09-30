@@ -10,11 +10,12 @@ backup_usage() {
 Usage:
   git-workflow backup create
   git-workflow backup list
-  git-workflow backup restore <id>
+  git-workflow backup apply <id>
   git-workflow backup delete <id>
 
-Backups use stable IDs returned by create or list. Restore keeps the backup;
-delete removes only the selected workflow backup.
+Create saves and verifies selected changes, then discards them locally.
+Apply adds a backup to the current state and keeps it; delete removes it.
+Backups remain local and use stable IDs returned by create or list.
 EOF
 }
 
@@ -24,7 +25,7 @@ case "$action" in
     backup_usage
     exit 0
     ;;
-  create|list|restore|delete)
+  create|list|apply|delete)
     shift
     ;;
   *)
@@ -44,7 +45,7 @@ case "$action" in
   create|list)
     [[ $# -eq 0 ]] || fail "usage: git-workflow backup $action"
     ;;
-  restore|delete)
+  apply|delete)
     [[ $# -eq 1 && "$1" != -* ]] || fail "usage: git-workflow backup $action <id>"
     ;;
 esac
@@ -59,22 +60,20 @@ fi
 case "$action" in
   create)
     load_backup_settings
-    BACKUP_OWNER=manual
     create_backup
     if [[ "$BACKUP_CREATED" != true ]]; then
       printf '[git] backup create skip reason=no-selected-changes\n'
       exit 0
     fi
-    reapply_backup || fail "backup restore failed after creation; backup retained"
     printf '[git] backup create ok id=%s method=%s\n' \
       "$(backup_id "$BACKUP_SHA")" "$BACKUP_METHOD"
     ;;
   list)
     list_backups
     ;;
-  restore)
-    restore_backup_id "$1"
-    printf '[git] backup restore ok id=%s\n' "$1"
+  apply)
+    apply_backup_id "$1"
+    printf '[git] backup apply ok id=%s\n' "$1"
     ;;
   delete)
     delete_backup_id "$1"

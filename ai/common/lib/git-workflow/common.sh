@@ -7,7 +7,7 @@ Usage:
   git-workflow prepare --base BRANCH --branch-name NAME
   git-workflow backup create
   git-workflow backup list
-  git-workflow backup restore <id>
+  git-workflow backup apply <id>
   git-workflow backup delete <id>
   git-workflow commit [--override-manual] --message MESSAGE (--all | -- PATH...)
   git-workflow commit --amend [--message MESSAGE] (--all | -- PATH...)
@@ -30,10 +30,11 @@ Usage:
 Commands:
   prepare
       Start new work before editing with --base and --branch-name. Explicitly
-      continue the checked-out working branch with --continue.
+      continue the checked-out working branch with --continue. Selected local
+      changes are backed up and discarded before preparation.
 
   backup
-      Create, list, restore, and delete workflow-managed backups by stable ID.
+      Save and discard selected changes; list, apply, or delete backups by stable ID.
       See git-workflow backup --help.
 
   commit
