@@ -1,6 +1,6 @@
 # Project Settings
 
-This reference describes development (`prepare`, `commit`, `push`) and explicitly authorized delivery (`merge`, `pr submit`, `pr merge`). Project settings are stored in:
+This reference describes repository workflow operations, including development, synchronization, and explicitly authorized delivery. Project settings are stored in:
 
 ```text
 <repository>/.ai/project.json
