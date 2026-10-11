@@ -355,7 +355,7 @@ When squash integration is used, the local working branch is force-deleted becau
 Delivery requires explicit user authorization:
 
 ```bash
-git-workflow pr submit [--base <branch>]
+git-workflow pr submit [--base <branch>] [--stay]
 git-workflow pr merge [--base <branch>]
 git-workflow merge [--base <branch>]
 ```
@@ -383,7 +383,7 @@ Supported values:
 
 PR commands require `gh` and authentication. Development commands do not. `merge` rejects pullRequest mode; PR commands reject localMerge mode.
 
-`pr submit` finds open PRs for the current head and resolves the base before pushing. Without `--base`, a single existing PR supplies its base after validation; multiple PRs require explicit selection. It generates the title from the sole commit subject or, for multiple commits, from the working branch name. The body lists all `base..working-branch` subjects oldest first under `## Summary`. Repeated submission updates the same PR using the complete history.
+`pr submit` finds open PRs for the current head and resolves the base before pushing. Without `--base`, a single existing PR supplies its base after validation; multiple PRs require explicit selection. It generates the title from the sole commit subject or, for multiple commits, from the working branch name. The body lists all `base..working-branch` subjects oldest first under `## Summary`. Repeated submission updates the same PR using the complete history. After success it checks out the PR's base without advancing that branch; `--stay` keeps the working branch checked out for this invocation. A failed submission leaves the working branch checked out. If submission succeeds but checkout fails, the PR remains open and the command reports partial success.
 
 `pr merge` requires an existing open PR and never creates one or enables auto-merge. It rejects merge queues, checks that the PR head matches the current commit, and confirms the PR has merged before syncing the base and cleaning up.
 

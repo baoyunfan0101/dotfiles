@@ -44,7 +44,7 @@ After each logical subtask, invoke `git-workflow commit` with its paths and a co
 git-workflow commit --message "<message>" -- <paths>...
 ```
 
-- Run `git-workflow pr submit` only when the user explicitly asks to submit, create, or update a PR.
+- Run `git-workflow pr submit` only when the user explicitly asks to submit, create, or update a PR. It returns to the base; use `--stay` when remaining on the working branch is requested.
 - Run `git-workflow pr merge` only when the user explicitly authorizes merging the PR (including "approve").
 - Run `git-workflow merge` only when the user explicitly authorizes local integration.
 - Task Spec or commit completion does not authorize PR submission or integration. Never infer merge authorization from PR submission, CI success, or task completion.

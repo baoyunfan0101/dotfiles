@@ -26,7 +26,7 @@ Usage:
   git-workflow branch rename <new-name>
   git-workflow branch delete <name> [--remote]
   git-workflow merge [--base BRANCH] [--message MESSAGE]
-  git-workflow pr submit [--base BRANCH]
+  git-workflow pr submit [--base BRANCH] [--stay]
   git-workflow pr merge [--base BRANCH]
 
 Commands:
@@ -158,13 +158,14 @@ EOF2
 pr_usage() {
   cat <<EOF2
 Usage:
-  git-workflow pr submit [--base BRANCH]
+  git-workflow pr submit [--base BRANCH] [--stay]
   git-workflow pr merge [--base BRANCH]
 
 Commands:
   submit
       Create or update the open PR for the working branch and base, using
-      complete branch history. Requires an explicit user request. Stops at URL.
+      complete branch history. Requires an explicit user request. Returns to
+      the base branch after success; --stay retains the working branch.
 
   merge
       Merge an existing open PR only with explicit user authorization, using

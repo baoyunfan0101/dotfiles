@@ -34,7 +34,13 @@ if [[ "$PR_ACTION" == submit ]]; then
   else
     gh pr edit "$pr_url" --title "$PR_TITLE" --body "$PR_BODY" >/dev/null
   fi
-  printf '[git] pr submit ok target=%s branch=%s url=%s\n' "$base_branch" "$working_branch" "$pr_url"
+  if [[ "$PR_STAY" != true ]]; then
+    if ! git checkout -q "$base_branch"; then
+      fail "PR submitted at $pr_url but could not switch to base $base_branch; working branch $working_branch retained"
+    fi
+  fi
+  printf '[git] pr submit ok target=%s branch=%s current=%s url=%s\n' \
+    "$base_branch" "$working_branch" "$(current_branch)" "$pr_url"
 else
   queue_enabled="$(gh api graphql \
     -f query='query($url: URI!) { resource(url: $url) { ... on PullRequest { isMergeQueueEnabled } } }' \

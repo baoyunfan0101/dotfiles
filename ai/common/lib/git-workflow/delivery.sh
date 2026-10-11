@@ -5,6 +5,7 @@ PR_TITLE=""
 PR_BODY=""
 INTEGRATION_BRANCH_DELETED=false
 DELIVERY_BASE=""
+PR_STAY=false
 
 source "$WORKFLOW_ROOT/lib/git-workflow/branch.sh"
 
@@ -19,6 +20,11 @@ parse_delivery_args() {
       --base=*)
         DELIVERY_BASE="${1#*=}"
         [[ -n "$DELIVERY_BASE" ]] || fail "missing value for --base"
+        shift
+        ;;
+      --stay)
+        [[ "$CURRENT_ACTION" == "pr submit" ]] || fail "unknown option: $1"
+        PR_STAY=true
         shift
         ;;
       --message)

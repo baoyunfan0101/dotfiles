@@ -262,10 +262,30 @@ class WorkflowTests(unittest.TestCase):
 
     def test_existing_current_branch_pr_delivery(self):
         self.existing_branch()
-        self.run_cli("pr", "submit")
+        self.run_cli("pr", "submit", "--stay")
         self.assertEqual(json.loads(Path(self.env["GH_STATE"]).read_text())["base"], "main")
         self.run_cli("pr", "merge")
         self.assertEqual(self.git("branch", "--show-current"), "main")
+
+    def test_pr_submit_returns_to_actual_base_and_stay_retains_branch(self):
+        self.existing_branch(bases=("main", "develop"))
+        base_head = self.git("rev-parse", "develop")
+        working_head = self.git("rev-parse", "HEAD")
+
+        result = self.run_cli("pr", "submit", "--base", "develop")
+
+        self.assertIn("current=develop", result.stdout)
+        self.assertEqual(self.git("branch", "--show-current"), "develop")
+        self.assertEqual(self.git("rev-parse", "HEAD"), base_head)
+        self.assertEqual(self.git("rev-parse", "fix/manual"), working_head)
+        self.assertEqual(json.loads(Path(self.env["GH_STATE"]).read_text())["state"], "OPEN")
+        self.git("switch", "fix/manual")
+        result = self.run_cli("pr", "submit", "--stay")
+        self.assertIn("current=fix/manual", result.stdout)
+        self.assertEqual(self.git("branch", "--show-current"), "fix/manual")
+        self.run_cli("pr", "submit")
+        self.assertEqual(self.git("branch", "--show-current"), "develop")
+        self.assertEqual(sum(call[:2] == ["pr", "create"] for call in self.gh_calls()), 1)
 
     def test_pr_submit_publishes_independently_of_manual_commit_mode(self):
         self.stub_gh()
@@ -279,7 +299,33 @@ class WorkflowTests(unittest.TestCase):
         result = self.run_cli("pr", "submit")
 
         self.assertIn("pr submit ok", result.stdout)
+        self.assertEqual(self.git("branch", "--show-current"), "main")
         self.assertNotEqual(self.git("ls-remote", "--heads", "origin", "feat/manual-submit"), "")
+
+    def test_pr_submit_failure_and_switch_failure_preserve_working_branch(self):
+        self.stub_gh()
+        self.save_settings(integration={"mode": "pullRequest"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.commit()
+        self.env["GH_FAIL"] = "pr create"
+        self.run_cli("pr", "submit", ok=False)
+        self.assertEqual(self.git("branch", "--show-current"), "feat/test")
+        self.env.pop("GH_FAIL")
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            'if [[ "$1" == checkout && "$2" == -q && "$3" == main ]]; then exit 1; fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        git_stub.chmod(0o755)
+
+        result = self.run_cli("pr", "submit", ok=False)
+
+        self.assertIn("PR submitted", result.stderr)
+        self.assertIn("could not switch to base main", result.stderr)
+        self.assertEqual(self.git("branch", "--show-current"), "feat/test")
+        self.assertEqual(json.loads(Path(self.env["GH_STATE"]).read_text())["state"], "OPEN")
 
     def test_current_branch_local_delivery(self):
         self.existing_branch(mode="localMerge")
@@ -339,8 +385,8 @@ class WorkflowTests(unittest.TestCase):
         before = self.git_snapshot()
         self.assertIn("ambiguous", self.run_cli("pr", "submit", ok=False).stderr)
         self.assertEqual(before, self.git_snapshot())
-        self.run_cli("pr", "submit", "--base", "develop")
-        self.run_cli("pr", "submit")
+        self.run_cli("pr", "submit", "--base", "develop", "--stay")
+        self.run_cli("pr", "submit", "--stay")
         state_path = Path(self.env["GH_STATE"])
         self.assertEqual(json.loads(state_path.read_text())["base"], "develop")
         self.env["GH_EXTRA_PRS"] = json.dumps([{"url": "https://example.invalid/pr/2", "baseRefName": "main"}])
@@ -348,14 +394,14 @@ class WorkflowTests(unittest.TestCase):
             before = self.git_snapshot()
             self.assertIn("ambiguous", self.run_cli("pr", action, ok=False).stderr)
             self.assertEqual(before, self.git_snapshot())
-        self.run_cli("pr", "submit", "--base=develop")
+        self.run_cli("pr", "submit", "--base=develop", "--stay")
         self.run_cli("pr", "merge", "--base", "develop")
         self.assertEqual(self.git("branch", "--show-current"), "develop")
         self.assertEqual(sum(call[:2] == ["pr", "create"] for call in self.gh_calls()), 1)
 
     def test_existing_pr_base_overrides_multiple_configured_defaults(self):
         self.existing_branch(bases=("main", "develop"))
-        self.run_cli("pr", "submit", "--base", "develop")
+        self.run_cli("pr", "submit", "--base", "develop", "--stay")
         self.run_cli("pr", "merge")
         self.assertEqual(self.git("branch", "--show-current"), "develop")
 
@@ -1326,7 +1372,7 @@ class WorkflowTests(unittest.TestCase):
                 self.change()
                 self.commit()
                 if pr_state != "none":
-                    self.run_cli("pr", "submit")
+                    self.run_cli("pr", "submit", "--stay")
                     if pr_state == "merged":
                         state = json.loads(state_path.read_text())
                         state["state"] = "MERGED"
@@ -1345,7 +1391,7 @@ class WorkflowTests(unittest.TestCase):
         self.prepare()
         self.change()
         self.commit()
-        self.run_cli("pr", "submit")
+        self.run_cli("pr", "submit", "--stay")
         before = self.git("rev-parse", "HEAD")
         self.assertIn("created=false", self.run_cli("prepare", "--continue").stdout)
         (self.repo / "review-fix").write_text("feedback\n")
@@ -1353,7 +1399,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotEqual(self.git("rev-parse", "HEAD"), before)
         self.assertIn(self.git("rev-parse", "HEAD"),
                       self.git("ls-remote", "--heads", "origin", "feat/test"))
-        self.run_cli("pr", "submit")
+        self.run_cli("pr", "submit", "--stay")
         self.assertEqual(sum(call[:2] == ["pr", "create"] for call in self.gh_calls()), 1)
 
     def test_prepare_continuation_does_not_inspect_pr_state(self):
@@ -1940,15 +1986,15 @@ class WorkflowTests(unittest.TestCase):
             (self.repo / "tracked").write_text(subject)
             self.run_cli("commit", "--message", subject, "--", "tracked")
         self.assertEqual(self.gh_calls(), [])
-        self.assertIn("url=https://example.invalid/pr/1", self.run_cli("pr", "submit").stdout)
+        self.assertIn("url=https://example.invalid/pr/1", self.run_cli("pr", "submit", "--stay").stdout)
         state_path = Path(self.env["GH_STATE"])
         state = json.loads(state_path.read_text())
         self.assertEqual(state["title"], "feat/test")
         self.assertEqual(state["body"], "## Summary\n\n- Commit A\n- Commit B\n- Commit C")
-        self.run_cli("pr", "submit")
+        self.run_cli("pr", "submit", "--stay")
         self.change("other")
         self.run_cli("commit", "--message", "Commit D", "--", "other")
-        self.run_cli("pr", "submit")
+        self.run_cli("pr", "submit", "--stay")
         state = json.loads(state_path.read_text())
         self.assertEqual(state["body"], "## Summary\n\n- Commit A\n- Commit B\n- Commit C\n- Commit D")
         calls = self.gh_calls()
@@ -2027,12 +2073,12 @@ class WorkflowTests(unittest.TestCase):
         self.run_cli("prepare", "--base", "main", "--branch-name", "feat/ai-harness-preflight")
         self.change()
         self.commit()
-        self.run_cli("pr", "submit")
+        self.run_cli("pr", "submit", "--stay")
         state_path = Path(self.env["GH_STATE"])
         self.assertEqual(json.loads(state_path.read_text())["title"], "Change")
         self.change("other")
         self.commit("other")
-        self.run_cli("pr", "submit")
+        self.run_cli("pr", "submit", "--stay")
         self.assertEqual(json.loads(state_path.read_text())["title"], "feat(ai): harness preflight")
 
     def test_pr_rechecks_authentication(self):
@@ -2065,7 +2111,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertFalse(any(call[:2] == ["pr", "create"] for call in self.gh_calls()))
         self.change()
         self.commit()
-        self.run_cli("pr", "submit")
+        self.run_cli("pr", "submit", "--stay")
         state_path = Path(self.env["GH_STATE"])
         state = json.loads(state_path.read_text())
         state["base"] = "other"
@@ -2081,7 +2127,7 @@ class WorkflowTests(unittest.TestCase):
         self.prepare()
         self.change()
         self.commit()
-        self.run_cli("pr", "submit")
+        self.run_cli("pr", "submit", "--stay")
         result = self.run_cli("pr", "merge")
         call = next(call for call in self.gh_calls() if call[:2] == ["pr", "merge"])
         self.assertIn("--merge" if method == "mergeCommit" else "--squash", call)
@@ -2119,7 +2165,7 @@ class WorkflowTests(unittest.TestCase):
         self.run_cli("pr", "submit", ok=False)
         self.assertFalse(any(call[:2] == ["pr", "create"] for call in self.gh_calls()))
         del self.env["GH_FAIL"]
-        self.run_cli("pr", "submit")
+        self.run_cli("pr", "submit", "--stay")
         self.env["GH_FAIL"] = "pr merge"
         self.run_cli("pr", "merge", ok=False)
         del self.env["GH_FAIL"]
@@ -2135,7 +2181,7 @@ class WorkflowTests(unittest.TestCase):
         self.prepare()
         self.change()
         self.commit()
-        self.run_cli("pr", "submit")
+        self.run_cli("pr", "submit", "--stay")
         local_base = self.git("commit-tree", "main^{tree}", "-p", "main", "-m", "Local base advance")
         self.git("update-ref", "refs/heads/main", local_base)
         self.run_cli("pr", "merge", ok=False)
@@ -2151,7 +2197,7 @@ class WorkflowTests(unittest.TestCase):
         self.prepare()
         self.change()
         self.commit()
-        self.run_cli("pr", "submit")
+        self.run_cli("pr", "submit", "--stay")
         for queue_value in ("true", "null"):
             self.env["GH_MERGE_QUEUE"] = queue_value
             self.run_cli("pr", "merge", ok=False)
