@@ -74,15 +74,13 @@ def extract(view_path, body_path):
 
 def summary(path):
     subjects = Path(path).read_text().rstrip("\n")
-    return f"## Summary\n\n{subjects}" if subjects else ""
+    return f"## Summary\n\n{subjects}" if subjects else "## Summary\n\nNo commits relative to base."
 
 
 def render(existing_path, old_path, new_path, output_path):
     existing = Path(existing_path).read_text()
     old = summary(old_path)
     new = summary(new_path)
-    if not new:
-        fail("PR has no commits relative to its base")
     managed = f"{START}\n{new}\n{END}"
     starts = list(re.finditer(rf"(?m)^{re.escape(START)}$", existing))
     ends = list(re.finditer(rf"(?m)^{re.escape(END)}$", existing))
