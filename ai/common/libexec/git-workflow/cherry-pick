@@ -29,7 +29,7 @@ if ! git cherry-pick "$target_sha"; then
   restore_failed_sequence cherry-pick "$branch" "$original_head"
 fi
 new_head="$(git rev-parse HEAD)"
-if [[ "$COMMIT_MODE" == automatic ]]; then
+if [[ "$COMMIT_MODE" == autoCommitAndPush ]]; then
   push_branch "$branch" || fail "cherry-pick commit created but push failed"
   pushed=true
 else

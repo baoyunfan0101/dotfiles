@@ -6,6 +6,7 @@ source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
 source "$WORKFLOW_ROOT/lib/git-workflow/backup.sh"
 source "$WORKFLOW_ROOT/lib/git-workflow/sync.sh"
 source "$WORKFLOW_ROOT/lib/git-workflow/branch.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/mutation.sh"
 
 PREPARE_BASE=""
 PREPARE_CONTINUE=false
@@ -62,8 +63,7 @@ parse_prepare_args() {
     fail "--continue cannot be combined with --base or --branch-name"
   fi
   if [[ "$PREPARE_CONTINUE" != true ]]; then
-    [[ "$PREPARE_BASE_SET" == true ]] || fail "new work requires --base and --branch-name"
-    [[ "$PREPARE_BRANCH_NAME_SET" == true ]] || fail "--base requires --branch-name"
+    [[ "$PREPARE_BRANCH_NAME_SET" == true ]] || fail "new work requires --branch-name"
     [[ -n "$BRANCH_NAME" ]] || fail "--branch-name is required"
   fi
 }
@@ -173,6 +173,7 @@ prepare() {
   fi
 
   if [[ "$PREPARE_CONTINUE" != true ]]; then
+    PREPARE_BASE="$(resolve_configured_base "$PREPARE_BASE")"
     prepare_from_base "$ORIGINAL_BRANCH"
     WORKING_BRANCH="$(current_branch)"
     print_prepare_result

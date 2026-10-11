@@ -29,7 +29,7 @@ if ! git revert --no-edit "$target_sha"; then
   restore_failed_sequence revert "$branch" "$original_head"
 fi
 new_head="$(git rev-parse HEAD)"
-if [[ "$COMMIT_MODE" == automatic ]]; then
+if [[ "$COMMIT_MODE" == autoCommitAndPush ]]; then
   push_branch "$branch" || fail "revert commit created but push failed"
   pushed=true
 else

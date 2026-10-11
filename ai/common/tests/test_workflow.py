@@ -267,6 +267,20 @@ class WorkflowTests(unittest.TestCase):
         self.run_cli("pr", "merge")
         self.assertEqual(self.git("branch", "--show-current"), "main")
 
+    def test_pr_submit_publishes_independently_of_manual_commit_mode(self):
+        self.stub_gh()
+        self.save_settings(commit={"mode": "manual"}, integration={"mode": "pullRequest"})
+        self.git("push", "-q", "origin", "main")
+        self.git("switch", "-c", "feat/manual-submit")
+        self.change()
+        self.run_cli("commit", "--override-manual", "--message", "Manual change", "--", "tracked")
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/manual-submit"), "")
+
+        result = self.run_cli("pr", "submit")
+
+        self.assertIn("pr submit ok", result.stdout)
+        self.assertNotEqual(self.git("ls-remote", "--heads", "origin", "feat/manual-submit"), "")
+
     def test_current_branch_local_delivery(self):
         self.existing_branch(mode="localMerge")
         self.run_cli("merge")
@@ -383,7 +397,8 @@ class WorkflowTests(unittest.TestCase):
                           "rebase", "merge", "push", "branch", "remote", "pr"})
         for meaning in ("before editing", "after editing", "--message MESSAGE",
                         "-- PATH...", "outside commit", "current branch",
-                        "local", "pull request", "--branch-name NAME"):
+                        "local", "pull request", "--branch-name NAME",
+                        "manual skips", "autoCommit stays local", "autoCommitAndPush publishes"):
             self.assertIn(meaning, help_text)
         for action in ("prepare", "bootstrap", "sync", "commit", "restore", "revert", "cherry-pick",
                        "rebase", "merge", "push"):
@@ -501,7 +516,7 @@ class WorkflowTests(unittest.TestCase):
     def test_copy_install(self):
         self.check_install("--copy")
 
-    def test_atomic_paths_and_automatic_push(self):
+    def test_atomic_paths_and_auto_commit_and_push(self):
         self.prepare()
         self.change()
         self.change("other")
@@ -510,6 +525,18 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("pushed=true", result.stdout)
         self.assertEqual(self.git("diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"), "tracked")
         self.assertEqual(self.git("diff", "--cached", "--name-only"), "other")
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/feat/test"))
+
+    def test_successive_logical_subtasks_create_separate_commits(self):
+        self.prepare()
+        self.change()
+        self.commit("tracked")
+        (self.repo / "other").write_text("second subtask\n")
+
+        second = self.run_cli("commit", "--message", "Second subtask", "--", "other")
+
+        self.assertIn("pushed=true", second.stdout)
+        self.assertEqual(self.git("rev-list", "--count", "main..HEAD"), "2")
         self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/feat/test"))
 
     def test_amend_selected_paths_and_message(self):
@@ -632,15 +659,51 @@ class WorkflowTests(unittest.TestCase):
         self.git("push", "-q", "origin", "main")
         self.prepare()
         self.change()
-        before = self.git("rev-parse", "HEAD")
+        before = self.git_snapshot()
         self.assertIn("skip reason=manual", self.commit().stdout)
-        self.assertEqual(self.git("rev-parse", "HEAD"), before)
+        self.assertEqual(self.git_snapshot(), before)
         self.assertIn("pushed=false", self.run_cli("commit", "--override-manual",
                       "--message", "Manual", "--", "tracked").stdout)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test"), "")
+        (self.repo / "tracked").write_text("manual amended\n")
+        amended = self.run_cli("commit", "--amend", "--override-manual", "--all")
+        self.assertIn("pushed=false", amended.stdout)
         self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test"), "")
         self.assertIn("skip reason=manual", self.run_cli("push").stdout)
         self.run_cli("push", "--override-manual")
         self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/feat/test"))
+
+    def test_auto_commit_mode_commits_locally_and_keeps_explicit_push(self):
+        self.save_settings(commit={"mode": "autoCommit"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        before = self.git("rev-parse", "HEAD")
+
+        result = self.commit()
+
+        self.assertIn("pushed=false", result.stdout)
+        self.assertNotEqual(self.git("rev-parse", "HEAD"), before)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test"), "")
+        pushed = self.run_cli("push")
+        self.assertIn("push ok branch=feat/test", pushed.stdout)
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/feat/test"))
+
+    def test_auto_commit_mode_amend_stays_local(self):
+        self.save_settings(commit={"mode": "autoCommit"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.commit()
+        self.run_cli("push")
+        remote_head = self.git("rev-parse", "origin/feat/test")
+        (self.repo / "tracked").write_text("amended locally\n")
+
+        result = self.run_cli("commit", "--amend", "--all")
+
+        self.assertIn("pushed=false", result.stdout)
+        self.assertNotEqual(self.git("rev-parse", "HEAD"), remote_head)
+        self.assertEqual(self.git("rev-parse", "origin/feat/test"), remote_head)
 
     def test_restore_only_selected_tracked_worktree_paths(self):
         self.prepare()
@@ -695,6 +758,31 @@ class WorkflowTests(unittest.TestCase):
         self.git("update-ref", "refs/heads/feat/test", merge_sha)
         self.assertIn("merge commits is not supported",
                       self.run_cli("revert", merge_sha, ok=False).stderr)
+
+    def test_auto_commit_mode_revert_and_cherry_pick_stay_local(self):
+        self.save_settings(commit={"mode": "autoCommit"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.commit()
+        target = self.git("rev-parse", "HEAD")
+
+        reverted = self.run_cli("revert", target)
+
+        self.assertIn("pushed=false", reverted.stdout)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test"), "")
+        self.git("branch", "source", "main")
+        self.git("switch", "source")
+        (self.repo / "picked").write_text("picked\n")
+        self.git("add", "picked")
+        self.git("commit", "-qm", "Source")
+        source = self.git("rev-parse", "HEAD")
+        self.git("switch", "feat/test")
+
+        picked = self.run_cli("cherry-pick", source)
+
+        self.assertIn("pushed=false", picked.stdout)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test"), "")
 
     def test_revert_conflict_aborts_without_changing_history(self):
         self.prepare()
@@ -780,6 +868,20 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", "main"), self.git("merge-base", "main", remote_base))
         self.assert_no_in_progress_git_operation()
 
+    def test_rebase_in_auto_commit_mode_does_not_publish(self):
+        self.save_settings(commit={"mode": "autoCommit"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        (self.repo / "feature").write_text("feature content\n")
+        self.run_cli("commit", "--message", "Feature", "--", "feature")
+        self.advance_remote_branch("main")
+
+        result = self.run_cli("rebase")
+
+        self.assertIn("pushed=false", result.stdout)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test"), "")
+        self.assertTrue(self.git("merge-base", "HEAD", "origin/main"))
+
     def test_rebase_base_validation_and_ambiguity(self):
         self.save_settings(branch={"baseBranches": ["main", "develop"]})
         self.git("branch", "develop")
@@ -845,7 +947,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_bootstrap_commits_and_publishes_base_before_development(self):
         self.unborn_repo()
-        self.settings(commit={"mode": "automatic"})
+        self.settings(commit={"mode": "autoCommitAndPush"})
         (self.repo / "README.md").write_bytes(b"initial project\n")
         (self.repo / "staged.txt").write_bytes(b"staged\n")
         (self.repo / "unselected.txt").write_bytes(b"keep\n")
@@ -905,6 +1007,13 @@ class WorkflowTests(unittest.TestCase):
         result = self.run_cli("bootstrap", "--message", "Initial", "--all", ok=False)
         self.assertIn("ambiguous base", result.stderr)
         self.assertEqual(before, self.git_snapshot())
+        self.settings(branch={"baseBranches": []})
+        before = self.git_snapshot()
+        result = self.run_cli("prepare", "--branch-name", "feat/no-base", ok=False)
+        self.assertIn("no configured base branches", result.stderr)
+        self.assertEqual(before, self.git_snapshot())
+        self.settings(branch={"baseBranches": ["main", "develop"]})
+        before = self.git_snapshot()
         result = self.run_cli("bootstrap", "--base", "main", "--message", "Initial", "--all", ok=False)
         self.assertIn("unborn branch is develop", result.stderr)
         self.assertEqual(before, self.git_snapshot())
@@ -981,6 +1090,18 @@ class WorkflowTests(unittest.TestCase):
                 self.assertIn(f"branch={branch} created=true", result.stdout)
                 self.git("switch", "main")
 
+    def test_prepare_uses_sole_configured_base_and_rejects_ambiguity(self):
+        result = self.run_cli("prepare", "--branch-name", "feat/implicit-base")
+        self.assertIn("branch=feat/implicit-base created=true", result.stdout)
+        self.git("switch", "main")
+        self.settings(branch={"baseBranches": ["main", "develop"]})
+        before = self.git_snapshot()
+
+        result = self.run_cli("prepare", "--branch-name", "feat/ambiguous-base", ok=False)
+
+        self.assertIn("ambiguous base", result.stderr)
+        self.assertEqual(before, self.git_snapshot())
+
     def test_prepare_rejects_invalid_branch_names_without_mutation(self):
         self.git("branch", "feat/existing")
         for branch, message in (
@@ -1029,7 +1150,7 @@ class WorkflowTests(unittest.TestCase):
         self.change()
         self.commit()
         old_head = self.git("rev-parse", "HEAD")
-        for args in ((), ("--branch-name", "feat/next"), ("--base", "main"),
+        for args in ((), ("--base", "main"),
                      ("--continue", "--branch-name", "feat/next"),
                      ("--continue", "--base", "main")):
             with self.subTest(args=args):
@@ -1037,13 +1158,12 @@ class WorkflowTests(unittest.TestCase):
                 result = self.run_cli("prepare", *args, ok=False)
                 self.assertIn("[git] prepare error", result.stderr)
                 self.assertEqual(self.git_snapshot(), before)
-        self.run_cli("prepare", "--base", "main", "--branch-name", "feat/next")
+        self.run_cli("prepare", "--branch-name", "feat/next")
         self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "main"))
         self.assertEqual(self.git("rev-parse", "feat/test"), old_head)
 
     def test_prepare_requires_one_complete_operation_before_mutation(self):
-        for arguments in ((), ("--branch-name", "feat/next"),
-                          ("--base", "main"),
+        for arguments in ((), ("--base", "main"),
                           ("--continue", "--branch-name", "feat/next"),
                           ("--continue", "--base", "main"),
                           ("--continue", "--branch-name", "")):
@@ -1497,7 +1617,7 @@ class WorkflowTests(unittest.TestCase):
         self.prepare()
         for arguments, message in (
             (("--base", "outside", "--branch-name", "feat/next"), "base is not configured"),
-            (("--base", "main"), "--base requires --branch-name"),
+            (("--base", "main"), "new work requires --branch-name"),
             (("--base", "main", "--branch-name", "feat/test"), "branch already exists"),
         ):
             with self.subTest(arguments=arguments):

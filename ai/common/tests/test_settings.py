@@ -67,12 +67,13 @@ class SettingsTests(unittest.TestCase):
             self.assertIn(meaning, instructions)
         self.assertIn("Do not read or edit `.ai/project.json` directly", instructions)
         for meaning in ("Read-only Git commands may run directly", "Do not directly run Git commands",
-                        "workflow capability gap", "prepare --base <base> --branch-name <name>",
+                        "workflow capability gap", "prepare --branch-name <name>",
                         "prepare --continue",
                         "backup create", "backup apply <id>", "backup delete <id>",
                         "commit --amend", "restore", "revert", "cherry-pick", "rebase"):
             self.assertIn(meaning, instructions)
         self.assertNotIn("git.integration.mode", instructions)
+        self.assertNotIn("git.commit.mode", instructions)
         self.assertNotIn("README", instructions)
 
     def test_shared_authoring_rules_keep_scopes_and_conditions(self):
@@ -121,6 +122,9 @@ class SettingsTests(unittest.TestCase):
                     self.assertEqual(entry["values"],
                                      sorted(model["ALLOWED_VALUES"][path]))
                 self.assertIn("description", entry)
+        self.assertEqual(schema["git.commit.mode"]["default"], "autoCommitAndPush")
+        self.assertEqual(schema["git.commit.mode"]["values"],
+                         ["autoCommit", "autoCommitAndPush", "manual"])
 
     def test_schema_path_and_unknown_path(self):
         result = self.run_project("schema", "git.integration.mode")
@@ -248,7 +252,7 @@ class SettingsTests(unittest.TestCase):
             "git": {
                 "sync": {"mode": "update", "updateMethod": "ffOnly"},
                 "backup": {"mode": "all", "method": "stash"},
-                "commit": {"mode": "automatic"},
+                "commit": {"mode": "autoCommitAndPush"},
                 "branch": {"baseBranches": ["main"],
                            "deleteAfterIntegration": False},
                 "integration": {"mode": "localMerge", "mergeMethod": "mergeCommit"},
@@ -283,6 +287,17 @@ class SettingsTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("missing setting: git", result.stderr)
                 self.assertEqual(self.config.read_bytes(), before)
+
+    def test_removed_commit_mode_is_rejected_without_migration(self):
+        self.write_config({"schemaVersion": 1, "git": {"commit": {"mode": "automatic"}}})
+        before = self.config.read_bytes()
+
+        result = self.run_project("effective")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("git.commit.mode must be one of: autoCommit, autoCommitAndPush, manual",
+                      result.stderr)
+        self.assertEqual(self.config.read_bytes(), before)
 
     def test_repository_configuration_is_complete(self):
         model = runpy.run_path(str(PROJECT))
@@ -319,7 +334,7 @@ class SettingsTests(unittest.TestCase):
         result = self.run_project("unset", "git.commit.mode")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(self.config.read_text()), self.defaults)
-        self.assertEqual(self.run_project("get", "git.commit.mode").stdout, "automatic\n")
+        self.assertEqual(self.run_project("get", "git.commit.mode").stdout, "autoCommitAndPush\n")
 
         result = self.run_project("unset", "git.commit.mode")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -377,6 +392,7 @@ class SettingsTests(unittest.TestCase):
         cases = (
             (("unknown.setting", "x", "git.commit.mode", "automatic"),
              "unknown setting"),
+            (("git.commit.mode", "automatic"), "must be one of"),
             (("workflow.enabled", "false", "git.integration.mode", "invalid"),
              "must be one of"),
             (("git.branch.baseBranches", '["main","main"]', "workflow.enabled", "false"),

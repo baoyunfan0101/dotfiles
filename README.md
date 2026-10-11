@@ -66,14 +66,14 @@ Delivery                 -> explicit user authorization
 | Command | Meaning |
 |---|---|
 | `git-workflow bootstrap --message "<message>" -- <paths>...` | Create and publish the first commit on the configured base in an empty repository. |
-| `git-workflow prepare --base <base> --branch-name <name>` | Start an independent task on a new branch from the synchronized base. |
+| `git-workflow prepare --branch-name <name>` | Start an independent task on a new branch from the sole configured base. Add `--base <base>` when several bases are configured. |
 | `git-workflow prepare --continue` | Explicitly continue the checked-out working branch. |
 | `git-workflow sync` | Fetch and fast-forward the checked-out configured base branch from its tracked remote branch. |
 | `git-workflow backup create` | Verify a persistent local backup, then discard the selected changes. |
 | `git-workflow backup list` | List workflow backups by stable ID. |
 | `git-workflow backup apply <id>` | Apply old changes to the current state while retaining the backup. |
 | `git-workflow backup delete <id>` | Delete one workflow backup. |
-| `git-workflow commit --message "<message>" -- <paths>...` | Record one atomic change. |
+| `git-workflow commit --message "<message>" -- <paths>...` | Record one logical subtask; Shell applies the configured commit and push policy. |
 | `git-workflow pr submit` | Create or update a PR when explicitly requested. |
 | `git-workflow pr merge` | Merge an existing PR when explicitly authorized. |
 | `git-workflow merge` | Integrate locally when explicitly authorized. |
