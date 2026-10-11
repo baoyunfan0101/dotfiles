@@ -14,10 +14,14 @@ if (( $# == 1 )); then
     printf 'Invalid test target: %s\n' "$test_name" >&2
     exit 2
   fi
-  test_file="test_${test_name}.py"
-  if [[ ! -f "$test_root/ai/common/tests/$test_file" ]]; then
-    printf 'Unknown test target: %s\n' "$test_name" >&2
-    exit 2
+  if [[ "$test_name" == workflow ]]; then
+    test_file='test_workflow_*.py'
+  else
+    test_file="test_${test_name}.py"
+    if [[ ! -f "$test_root/ai/common/tests/$test_file" ]]; then
+      printf 'Unknown test target: %s\n' "$test_name" >&2
+      exit 2
+    fi
   fi
   unittest_args+=(-p "$test_file")
 fi

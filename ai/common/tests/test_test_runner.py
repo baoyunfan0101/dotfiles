@@ -45,11 +45,13 @@ class TestRunnerTests(unittest.TestCase):
         self.assertIn("HOME=/tmp/dotfiles-test.", result.stdout)
 
     def test_existing_modules_can_be_selected_by_name(self):
-        for name in ("workflow", "settings", "preflight", "bootstrap"):
+        for name in ("workflow", "workflow_prepare", "workflow_commit",
+                     "workflow_delivery", "settings", "preflight", "bootstrap"):
             with self.subTest(name=name):
                 result = self.run_tests(name)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn(f" -p test_{name}.py\n", result.stdout)
+                pattern = "test_workflow_*.py" if name == "workflow" else f"test_{name}.py"
+                self.assertIn(f" -p {pattern}\n", result.stdout)
                 self.assertIn("SANDBOX=/tmp/dotfiles-test.", result.stdout)
 
     def test_invalid_or_unknown_targets_fail_explicitly(self):
