@@ -3,14 +3,20 @@ set -Eeuo pipefail
 
 WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/mutation.sh"
 
 PUSH_OVERRIDE_MANUAL=false
+PUSH_REWRITE=false
 
 parse_push_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --override-manual)
         PUSH_OVERRIDE_MANUAL=true
+        shift
+        ;;
+      --rewrite)
+        PUSH_REWRITE=true
         shift
         ;;
       -h|--help)
@@ -27,6 +33,7 @@ parse_push_args() {
 push_changes() {
   CURRENT_ACTION="push"
   local branch
+  local remote
 
   parse_push_args "$@"
   preflight_core
@@ -54,7 +61,17 @@ push_changes() {
   esac
 
   branch="$(current_branch)"
-  push_branch "$branch"
+  if [[ "$PUSH_REWRITE" == true ]]; then
+    require_working_branch "$branch"
+    remote="$(remote_for_branch "$branch")"
+    pending_rewrite "$branch" "$remote" || fail "no recorded local rewrite for $branch"
+    git merge-base --is-ancestor "$REWRITE_HEAD" HEAD ||
+      fail "local branch diverged from recorded rewrite"
+    publish_rewrite "$branch" "$remote" "$REWRITE_EXPECTED" ||
+      fail "lease-safe rewrite push failed; local commits were preserved"
+  else
+    push_branch "$branch"
+  fi
 
   printf '[git] push ok branch=%s\n' "$branch"
 }

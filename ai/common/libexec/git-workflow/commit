@@ -113,7 +113,7 @@ commit_changes() {
     original_index_tree="$(git write-tree)" || fail "cannot record index before amend"
     remote="$(remote_for_branch "$branch")"
     remote_sha="$(remote_branch_sha "$remote" "$branch")"
-    verify_remote_ancestor "$remote_sha" "$original_head"
+    verify_rewrite_source "$branch" "$remote" "$remote_sha" "$original_head"
     if [[ "$COMMIT_MESSAGE_GIVEN" == true ]]; then
       message_args=(-m "$COMMIT_MESSAGE")
     else
@@ -158,6 +158,9 @@ commit_changes() {
   commit_sha="$(git rev-parse HEAD)"
   if [[ "$COMMIT_AMEND" == true && "$commit_sha" == "$original_head" ]]; then
     fail "amend did not change HEAD"
+  fi
+  if [[ "$COMMIT_AMEND" == true ]]; then
+    record_rewrite "$branch" "$remote" "$remote_sha" "$commit_sha"
   fi
 
   if [[ "$COMMIT_MODE" != "autoCommitAndPush" ]]; then

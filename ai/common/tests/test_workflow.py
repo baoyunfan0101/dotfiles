@@ -705,6 +705,143 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotEqual(self.git("rev-parse", "HEAD"), remote_head)
         self.assertEqual(self.git("rev-parse", "origin/feat/test"), remote_head)
 
+        self.assertIn("non-fast-forward", self.run_cli("push", ok=False).stderr)
+        rewritten = self.git("rev-parse", "HEAD")
+        self.run_cli("push", "--rewrite")
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test").split()[0],
+                         rewritten)
+        self.assertIn("no recorded local rewrite", self.run_cli("push", "--rewrite", ok=False).stderr)
+
+    def test_manual_published_amend_requires_both_overrides(self):
+        self.save_settings(commit={"mode": "manual"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.run_cli("commit", "--override-manual", "--message", "Manual", "--all")
+        self.run_cli("push", "--override-manual")
+        old_remote = self.git("rev-parse", "origin/feat/test")
+        (self.repo / "tracked").write_text("manual rewrite\n")
+
+        self.run_cli("commit", "--amend", "--override-manual", "--all")
+        rewritten = self.git("rev-parse", "HEAD")
+        self.assertIn("skip reason=manual", self.run_cli("push", "--rewrite").stdout)
+        self.assertEqual(self.git("rev-parse", "origin/feat/test"), old_remote)
+        self.run_cli("push", "--rewrite", "--override-manual")
+        self.assertEqual(self.git("rev-parse", "origin/feat/test"), rewritten)
+
+    def test_rebase_published_history_then_explicit_rewrite_push(self):
+        self.save_settings(commit={"mode": "autoCommit"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        (self.repo / "feature").write_text("feature\n")
+        self.run_cli("commit", "--message", "Feature", "--", "feature")
+        self.run_cli("push")
+        old_remote = self.git("rev-parse", "origin/feat/test")
+        self.advance_remote_branch("main")
+
+        result = self.run_cli("rebase")
+        rewritten = self.git("rev-parse", "HEAD")
+        self.assertIn("pushed=false", result.stdout)
+        self.assertNotEqual(rewritten, old_remote)
+        self.assertEqual(self.git("rev-parse", "origin/feat/test"), old_remote)
+        self.run_cli("push", "--rewrite")
+        self.assertEqual(self.git("rev-parse", "origin/feat/test"), rewritten)
+
+    def test_rewrite_push_rejects_remote_change_and_preserves_local_work(self):
+        self.save_settings(commit={"mode": "autoCommit"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.commit()
+        self.run_cli("push")
+        (self.repo / "tracked").write_text("rewritten\n")
+        self.run_cli("commit", "--amend", "--all")
+        rewritten = self.git("rev-parse", "HEAD")
+        (self.repo / "untracked").write_text("keep\n")
+        self.advance_remote_branch("feat/test")
+        remote_head = self.git("ls-remote", "--heads", "origin", "feat/test").split()[0]
+
+        result = self.run_cli("push", "--rewrite", ok=False)
+        self.assertIn("remote branch changed", result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), rewritten)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test").split()[0],
+                         remote_head)
+        self.assertEqual((self.repo / "untracked").read_text(), "keep\n")
+
+    def test_rewrite_push_rejects_unrelated_local_history_and_base(self):
+        self.assertIn("configured base branch",
+                      self.run_cli("push", "--rewrite", ok=False).stderr)
+        self.save_settings(commit={"mode": "autoCommit"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.commit()
+        self.run_cli("push")
+        (self.repo / "tracked").write_text("rewritten\n")
+        self.run_cli("commit", "--amend", "--all")
+        remote_head = self.git("rev-parse", "origin/feat/test")
+        self.git("reset", "--hard", "main")
+        (self.repo / "unrelated").write_text("different history\n")
+        self.git("add", "unrelated")
+        self.git("commit", "-qm", "Unrelated")
+        unrelated = self.git("rev-parse", "HEAD")
+
+        result = self.run_cli("push", "--rewrite", ok=False)
+        self.assertIn("local branch diverged", result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), unrelated)
+        self.assertEqual(self.git("rev-parse", "origin/feat/test"), remote_head)
+
+    def test_rewrite_push_uses_lease_against_race(self):
+        self.save_settings(commit={"mode": "autoCommit"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.commit()
+        self.run_cli("push")
+        old_remote = self.git("rev-parse", "origin/feat/test")
+        (self.repo / "tracked").write_text("rewritten\n")
+        self.run_cli("commit", "--amend", "--all")
+        rewritten = self.git("rev-parse", "HEAD")
+        remote_advance = self.git("--git-dir", str(self.remote), "commit-tree",
+                                  f"{old_remote}^{{tree}}", "-p", old_remote,
+                                  "-m", "Concurrent remote update")
+        log = self.root / "push.log"
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            'if [[ "$1" == push && "$*" == *--force-with-lease* ]]; then\n'
+                            f'  printf "%s\\n" "$*" >> "{log}"\n'
+                            f'  "{git_executable}" --git-dir "{self.remote}" update-ref refs/heads/feat/test {remote_advance}\n'
+                            'fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        git_stub.chmod(0o755)
+
+        result = self.run_cli("push", "--rewrite", ok=False)
+        self.assertIn("lease-safe rewrite push failed", result.stderr)
+        self.assertIn(f"--force-with-lease=refs/heads/feat/test:{old_remote}", log.read_text())
+        self.assertEqual(self.git("rev-parse", "HEAD"), rewritten)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test").split()[0],
+                         remote_advance)
+
+    def test_rewrite_push_rejects_unrelated_remote_replacement(self):
+        self.save_settings(commit={"mode": "autoCommit"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.commit()
+        self.run_cli("push")
+        (self.repo / "tracked").write_text("rewritten\n")
+        self.run_cli("commit", "--amend", "--all")
+        rewritten = self.git("rev-parse", "HEAD")
+        replacement = self.git("rev-parse", "main")
+        self.git("--git-dir", str(self.remote), "update-ref", "refs/heads/feat/test", replacement)
+
+        result = self.run_cli("push", "--rewrite", ok=False)
+        self.assertIn("remote branch changed", result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), rewritten)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test").split()[0],
+                         replacement)
+
     def test_restore_only_selected_tracked_worktree_paths(self):
         self.prepare()
         (self.repo / "other").write_text("other original\n")
