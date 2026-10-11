@@ -85,16 +85,23 @@ sync_pr_after_push() {
   local remote="$2"
   local previous_head="$3"
   local temp
+  local integration_mode
 
   PR_SYNC_STATUS=none
   PR_SYNC_REASON=""
   [[ -n "$previous_head" ]] || return 0
-  temp="$(mktemp -d 2>/dev/null || true)"
-  if [[ -z "$temp" ]]; then
-    pr_sync_failure "cannot create temporary PR metadata files"
+  if ! integration_mode="$(setting git.integration.mode 2>/dev/null)"; then
+    pr_sync_failure "cannot read integration mode"
+  elif [[ "$integration_mode" != pullRequest ]]; then
+    return 0
   else
-    _sync_pr_after_push "$temp" "$branch" "$remote" "$previous_head"
-    rm -rf -- "$temp" || true
+    temp="$(mktemp -d 2>/dev/null || true)"
+    if [[ -z "$temp" ]]; then
+      pr_sync_failure "cannot create temporary PR metadata files"
+    else
+      _sync_pr_after_push "$temp" "$branch" "$remote" "$previous_head"
+      rm -rf -- "$temp" || true
+    fi
   fi
   if [[ "$PR_SYNC_STATUS" == failed ]]; then
     printf '[git] pr sync warning branch=%s reason="%s"\n' "$branch" "$PR_SYNC_REASON" >&2

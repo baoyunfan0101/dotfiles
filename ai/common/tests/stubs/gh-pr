@@ -39,12 +39,13 @@ if args[:2] == ["pr", "list"]:
     prs = json.loads(os.environ.get("GH_EXTRA_PRS", "[]"))
     if state.get("state") == "OPEN" and state["head"] == value("--head"):
         prs.append({"url": state["url"], "baseRefName": state["base"],
-                    "body": state.get("body", "")})
+                    "body": state.get("body", ""),
+                    "headRepository": {"nameWithOwner": os.environ["GH_REPO_ID"]}})
     print(json.dumps(prs))
 elif args[:2] == ["pr", "create"]:
     state = {"state": "OPEN", "head": value("--head"), "base": value("--base"),
              "title": value("--title"), "body": body_value(),
-             "url": "https://example.invalid/pr/1"}
+             "url": "https://github.com/owner/dotfiles/pull/1"}
     print(state["url"])
 elif args[:2] == ["pr", "edit"]:
     if "--title" in args:
@@ -56,7 +57,7 @@ elif args[:2] == ["pr", "merge"]:
     assert state["state"] == "OPEN"
     assert git("rev-parse", "HEAD") == value("--match-head-commit")
     if not os.environ.get("GH_PENDING"):
-        remote = git("remote", "get-url", "origin")
+        remote = os.environ["GH_REMOTE_PATH"]
         with tempfile.TemporaryDirectory(dir=state_path.parent) as directory:
             git("clone", "-q", "--branch", state["base"], remote, directory)
             if "--squash" in args:

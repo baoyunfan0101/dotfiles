@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import re
 import sys
+from urllib.parse import urlsplit
 
 
 START = "<!-- git-workflow:summary:start -->"
@@ -22,24 +23,41 @@ def write_body(value, path):
     Path(path).write_text(value)
 
 
+def remote_repository(remote_url):
+    match = re.fullmatch(
+        r"(?:(?:https://|ssh://git@)([^/:?#@\s]+)(?::\d+)?/|git@([^/:?#@\s]+):)"
+        r"([^/:?#@\s]+)/([^/:?#@\s]+?)(?:\.git)?/?",
+        remote_url,
+        re.IGNORECASE,
+    )
+    if not match or any(part in (".", "..") for part in match.groups()[2:]):
+        fail("cannot verify GitHub remote repository")
+    host = match.group(1) or match.group(2)
+    return host.casefold(), f"{match.group(3)}/{match.group(4)}".casefold()
+
+
 def select(prs_path, body_path, remote_url):
     prs = json.loads(Path(prs_path).read_text())
     if not isinstance(prs, list) or any(not isinstance(pr, dict) for pr in prs):
         fail("invalid open PR response")
-    remote_match = re.search(
-        r"(?:(?:https?://|ssh://)[^/]+/|[^/]+:)([^/]+)/([^/]+?)(?:\.git)?/?$",
-        remote_url,
-    )
-    if remote_match:
-        expected_repo = "/".join(remote_match.groups())
-        prs = [pr for pr in prs
-               if isinstance(pr.get("headRepository"), dict)
-               and pr["headRepository"].get("nameWithOwner") == expected_repo]
-    if not prs:
+    expected_host, expected_repo = remote_repository(remote_url)
+    matches = []
+    for pr in prs:
+        repository = pr.get("headRepository")
+        identity = repository.get("nameWithOwner") if isinstance(repository, dict) else None
+        if not isinstance(identity, str) or not re.fullmatch(r"[^/\s]+/[^/\s]+", identity):
+            fail("open PR repository identity is unavailable")
+        if identity.casefold() == expected_repo:
+            url = pr.get("url")
+            parsed_url = urlsplit(url) if isinstance(url, str) else None
+            if not parsed_url or parsed_url.scheme != "https" or parsed_url.hostname != expected_host:
+                fail("open PR host does not match remote")
+            matches.append(pr)
+    if not matches:
         raise SystemExit(3)
-    if len(prs) != 1:
+    if len(matches) != 1:
         fail("ambiguous open PRs for pushed branch")
-    pr = prs[0]
+    pr = matches[0]
     url, base = pr.get("url"), pr.get("baseRefName")
     if not isinstance(url, str) or not url or not isinstance(base, str) or not base:
         fail("open PR has no usable URL or base")

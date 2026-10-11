@@ -6,6 +6,7 @@ import re
 import runpy
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -97,6 +98,17 @@ class WorkflowTests(unittest.TestCase):
         path.chmod(0o755)
         self.env["GH_LOG"] = str(self.root / "gh.log")
         self.env["GH_STATE"] = str(self.root / "pr.json")
+        self.env["GH_REPO_ID"] = "owner/dotfiles"
+        self.env["GH_REMOTE_PATH"] = str(self.remote)
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            'if [[ "$1" == remote && "$2" == get-url && "$3" == origin ]]; then\n'
+                            '  printf "%s\\n" "git@github.com:owner/dotfiles.git"\n'
+                            '  exit 0\n'
+                            'fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        git_stub.chmod(0o755)
 
     def gh_calls(self):
         log = Path(self.env["GH_LOG"])
@@ -2000,7 +2012,8 @@ class WorkflowTests(unittest.TestCase):
             self.run_cli("commit", "--message", subject, "--", "tracked")
         self.assertFalse(any(call[:2] in (["pr", "create"], ["pr", "edit"])
                              for call in self.gh_calls()))
-        self.assertIn("url=https://example.invalid/pr/1", self.run_cli("pr", "submit", "--stay").stdout)
+        self.assertIn("url=https://github.com/owner/dotfiles/pull/1",
+                      self.run_cli("pr", "submit", "--stay").stdout)
         state_path = Path(self.env["GH_STATE"])
         state = json.loads(state_path.read_text())
         self.assertEqual(state["title"], "feat/test")
@@ -2059,6 +2072,112 @@ class WorkflowTests(unittest.TestCase):
 
         self.assertIn("pr=updated", pushed.stdout)
         self.assertIn("- Change\n- Second", json.loads(state_path.read_text())["body"])
+
+    def test_explicit_rewrite_push_updates_summary_after_local_amend(self):
+        state_path = self.open_test_pr("autoCommit")
+        state = json.loads(state_path.read_text())
+        state["body"] += "\n\n## Notes\n\nKeep this note.\n"
+        state_path.write_text(json.dumps(state))
+        old_remote = self.git("rev-parse", "origin/feat/test")
+        (self.repo / "tracked").write_text("amended\n")
+
+        amended = self.run_cli("commit", "--amend", "--message", "Revised", "--all")
+        self.assertIn("pushed=false", amended.stdout)
+        self.assertEqual(self.git("rev-parse", "origin/feat/test"), old_remote)
+        self.assertIn("- Change", json.loads(state_path.read_text())["body"])
+
+        pushed = self.run_cli("push", "--rewrite")
+        body = json.loads(state_path.read_text())["body"]
+        self.assertIn("pr=updated", pushed.stdout)
+        self.assertIn("- Revised", body)
+        self.assertNotIn("- Change", body)
+        self.assertTrue(body.endswith("\n\n## Notes\n\nKeep this note.\n"))
+        self.assertEqual(self.git("rev-parse", "origin/feat/test"),
+                         self.git("rev-parse", "HEAD"))
+
+    def test_local_merge_explicit_push_works_without_gh(self):
+        self.save_settings(integration={"mode": "localMerge"},
+                           commit={"mode": "autoCommit"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        (self.bin / "gh").unlink()
+        (self.bin / "git").symlink_to(shutil.which("git"))
+        (self.bin / "python3").symlink_to(sys.executable)
+        self.env["PATH"] = f"{self.bin}:/usr/bin:/bin"
+        self.assertIsNone(shutil.which("gh", path=self.env["PATH"]))
+        self.change()
+
+        self.assertIn("pushed=false", self.commit().stdout)
+        result = self.run_cli("push")
+
+        self.assertIn("push ok branch=feat/test pr=none", result.stdout)
+        self.assertEqual(self.git("rev-parse", "HEAD"),
+                         self.git("ls-remote", "--heads", "origin", "feat/test").split()[0])
+
+    def test_local_merge_auto_push_and_rewrites_never_call_gh(self):
+        self.stub_gh()
+        self.save_settings(integration={"mode": "localMerge"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.assertIn("pushed=true pr=none", self.commit().stdout)
+        (self.repo / "tracked").write_text("amended\n")
+        self.assertIn("pushed=true pr=none",
+                      self.run_cli("commit", "--amend", "--all").stdout)
+        self.advance_remote_branch("main")
+        self.assertIn("pushed=true pr=none", self.run_cli("rebase").stdout)
+        self.assertEqual(self.gh_calls(), [])
+
+    def test_metadata_identity_failure_preserves_pushed_commit(self):
+        state_path = self.open_test_pr()
+        original_body = json.loads(state_path.read_text())["body"]
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            'if [[ "$1" == remote && "$2" == get-url && "$3" == origin ]]; then\n'
+                            '  printf "%s\\n" "file:///unverifiable/repo.git"\n'
+                            '  exit 0\n'
+                            'fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        (self.repo / "second").write_text("second\n")
+
+        result = self.run_cli("commit", "--message", "Second", "--", "second")
+
+        self.assertIn("pushed=true pr=failed", result.stdout)
+        self.assertIn("cannot verify GitHub remote repository", result.stderr)
+        self.assertEqual(json.loads(state_path.read_text())["body"], original_body)
+        self.assertEqual(self.git("rev-parse", "HEAD"),
+                         self.git("ls-remote", "--heads", "origin", "feat/test").split()[0])
+        self.assertFalse(any(call[:2] == ["pr", "edit"] for call in self.gh_calls()))
+
+    def test_missing_pr_identity_preserves_pushed_commit(self):
+        state_path = self.open_test_pr()
+        original_body = json.loads(state_path.read_text())["body"]
+        self.env["GH_REPO_ID"] = ""
+        (self.repo / "second").write_text("second\n")
+
+        result = self.run_cli("commit", "--message", "Second", "--", "second")
+
+        self.assertIn("pushed=true pr=failed", result.stdout)
+        self.assertIn("repository identity is unavailable", result.stderr)
+        self.assertEqual(json.loads(state_path.read_text())["body"], original_body)
+        self.assertFalse(any(call[:2] == ["pr", "edit"] for call in self.gh_calls()))
+        self.assertEqual(self.git("rev-parse", "HEAD"),
+                         self.git("ls-remote", "--heads", "origin", "feat/test").split()[0])
+
+    def test_mismatched_pr_identity_does_not_edit(self):
+        state_path = self.open_test_pr()
+        original_body = json.loads(state_path.read_text())["body"]
+        self.env["GH_REPO_ID"] = "other/dotfiles"
+        (self.repo / "second").write_text("second\n")
+
+        result = self.run_cli("commit", "--message", "Second", "--", "second")
+
+        self.assertIn("pushed=true pr=none", result.stdout)
+        self.assertEqual(json.loads(state_path.read_text())["body"], original_body)
+        self.assertFalse(any(call[:2] == ["pr", "edit"] for call in self.gh_calls()))
+        self.assertEqual(self.git("rev-parse", "HEAD"),
+                         self.git("ls-remote", "--heads", "origin", "feat/test").split()[0])
 
     def test_summary_uses_open_pr_actual_base(self):
         self.stub_gh()
@@ -2131,9 +2250,9 @@ class WorkflowTests(unittest.TestCase):
         prs_path = self.root / "prs.json"
         body_path = self.root / "body.txt"
         helper = COMMON / "lib/git-workflow/pr-summary.py"
-        fork = {"url": "https://example.invalid/pr/fork", "baseRefName": "main",
+        fork = {"url": "https://github.com/owner/dotfiles/pull/2", "baseRefName": "main",
                 "body": "fork", "headRepository": {"nameWithOwner": "other/dotfiles"}}
-        own = {"url": "https://example.invalid/pr/own", "baseRefName": "develop",
+        own = {"url": "https://github.com/owner/dotfiles/pull/1", "baseRefName": "develop",
                "body": "own", "headRepository": {"nameWithOwner": "owner/dotfiles"}}
         prs_path.write_text(json.dumps([fork, own]))
 
@@ -2142,13 +2261,60 @@ class WorkflowTests(unittest.TestCase):
                                   capture_output=True, text=True)
 
         self.assertEqual(selected.returncode, 0, selected.stderr)
-        self.assertEqual(selected.stdout.strip(), "https://example.invalid/pr/own\tdevelop")
+        self.assertEqual(selected.stdout.strip(),
+                         "https://github.com/owner/dotfiles/pull/1\tdevelop")
         self.assertEqual(body_path.read_text(), "own")
         prs_path.write_text(json.dumps([fork]))
         no_match = subprocess.run(["python3", str(helper), "select", str(prs_path),
                                    str(body_path), "git@github.com:owner/dotfiles.git"],
                                   capture_output=True, text=True)
         self.assertEqual(no_match.returncode, 3)
+
+    def test_pr_selection_requires_verifiable_repository_identity(self):
+        prs_path = self.root / "prs.json"
+        body_path = self.root / "body.txt"
+        helper = COMMON / "lib/git-workflow/pr-summary.py"
+        own = {"url": "https://github.com/owner/dotfiles/pull/1", "baseRefName": "main",
+               "body": "own", "headRepository": {"nameWithOwner": "owner/dotfiles"}}
+        prs_path.write_text(json.dumps([own]))
+
+        for remote_url in ("https://github.com/owner/dotfiles.git",
+                           "git@github.com:owner/dotfiles.git",
+                           "ssh://git@github.com/owner/dotfiles.git"):
+            with self.subTest(remote_url=remote_url):
+                selected = subprocess.run(["python3", str(helper), "select", str(prs_path),
+                                           str(body_path), remote_url],
+                                          capture_output=True, text=True)
+                self.assertEqual(selected.returncode, 0, selected.stderr)
+                self.assertEqual(body_path.read_text(), "own")
+
+        body_path.write_text("unchanged")
+        for remote_url in (str(self.remote), "https://github.com/owner/dotfiles/extra",
+                           "https://github.com/owner/dotfiles.git?ref=main"):
+            with self.subTest(remote_url=remote_url):
+                rejected = subprocess.run(["python3", str(helper), "select", str(prs_path),
+                                           str(body_path), remote_url],
+                                          capture_output=True, text=True)
+                self.assertEqual(rejected.returncode, 1)
+                self.assertIn("cannot verify GitHub remote repository", rejected.stderr)
+                self.assertEqual(body_path.read_text(), "unchanged")
+
+        for repository in (None, {}, {"nameWithOwner": "other/dotfiles"}):
+            with self.subTest(repository=repository):
+                prs_path.write_text(json.dumps([{**own, "headRepository": repository}]))
+                rejected = subprocess.run(["python3", str(helper), "select", str(prs_path),
+                                           str(body_path), "git@github.com:owner/dotfiles.git"],
+                                          capture_output=True, text=True)
+                expected_code = (3 if isinstance(repository, dict) and
+                                 repository.get("nameWithOwner") == "other/dotfiles" else 1)
+                self.assertEqual(rejected.returncode, expected_code)
+                self.assertEqual(body_path.read_text(), "unchanged")
+        prs_path.write_text(json.dumps([{**own, "url": "https://other.example/pull/1"}]))
+        rejected = subprocess.run(["python3", str(helper), "select", str(prs_path),
+                                   str(body_path), "git@github.com:owner/dotfiles.git"],
+                                  capture_output=True, text=True)
+        self.assertEqual(rejected.returncode, 1)
+        self.assertIn("host does not match", rejected.stderr)
 
     def test_unmanaged_summary_does_not_block_push(self):
         state_path = self.open_test_pr()
@@ -2168,8 +2334,9 @@ class WorkflowTests(unittest.TestCase):
         state_path = self.open_test_pr()
         original = json.loads(state_path.read_text())["body"]
         self.env["GH_EXTRA_PRS"] = json.dumps([{
-            "url": "https://example.invalid/pr/2", "baseRefName": "main",
-            "body": "## Summary\n\n- Other"}])
+            "url": "https://github.com/owner/dotfiles/pull/2", "baseRefName": "main",
+            "body": "## Summary\n\n- Other",
+            "headRepository": {"nameWithOwner": "owner/dotfiles"}}])
         (self.repo / "second").write_text("second\n")
 
         result = self.run_cli("commit", "--message", "Second", "--", "second")
