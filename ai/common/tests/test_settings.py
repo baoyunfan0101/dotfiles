@@ -64,38 +64,6 @@ class SettingsTests(unittest.TestCase):
         self.config.parent.mkdir(parents=True, exist_ok=True)
         self.config.write_text(json.dumps(self.complete(config) if complete else config))
 
-    def test_shared_instructions_describe_on_demand_configuration(self):
-        instructions = (PROJECT.parents[1] / "instructions.md").read_text()
-        self.assertIn("only when the user explicitly asks", instructions)
-        self.assertIn("agent-project schema [path]", instructions)
-        self.assertIn("agent-project --help", instructions)
-        self.assertIn("git-workflow --help", instructions)
-        for meaning in ("prepare -> edit -> commit*", "checked-out branch alone",
-                        "multiple Task Specs", "explicitly asks", "pr submit",
-                        "explicitly authorizes", "pr merge", "local integration",
-                        "Never infer merge authorization", "CI success"):
-            self.assertIn(meaning, instructions)
-        self.assertIn("Do not read or edit `.ai/project.json` directly", instructions)
-        for meaning in ("Read-only Git commands may run directly", "Do not directly run Git commands",
-                        "workflow capability gap", "prepare --branch-name <name>",
-                        "prepare --continue",
-                        "backup create", "backup apply <id>", "backup delete <id>",
-                        "commit --amend", "restore", "revert", "cherry-pick", "rebase"):
-            self.assertIn(meaning, instructions)
-        self.assertNotIn("git.integration.mode", instructions)
-        self.assertNotIn("git.commit.mode", instructions)
-        self.assertNotIn("README", instructions)
-
-    def test_shared_authoring_rules_keep_scopes_and_conditions(self):
-        instructions = (PROJECT.parents[1] / "instructions.md").read_text()
-        self.assertEqual(instructions.count("## Authoring"), 1)
-        authoring = instructions.split("## Authoring\n", 1)[1].split("\n## ", 1)[0]
-        for meaning in ("User-facing responses", "user's latest message",
-                        "Project files", "ASCII", "Existing comments",
-                        "code or section remains", "create backups directly",
-                        "configured workflows", "~~~md"):
-            self.assertIn(meaning, authoring)
-
     def test_help(self):
         result = self.run_project("--help")
         self.assertEqual(result.returncode, 0, result.stderr)

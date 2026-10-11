@@ -2,60 +2,48 @@
 
 ## Authoring
 
-- User-facing responses: match the language of the user's latest message unless requested otherwise.
-- Project files: use ASCII only unless requested otherwise.
-- Existing comments: preserve them while their code or section remains unless requested otherwise.
-- Do not create backups directly; backups may only be created by configured workflows.
-- When showing Markdown containing fenced code blocks, use `~~~md` as the outer fence.
+- Match the user's latest language in responses unless requested otherwise.
+- Use ASCII in project files unless requested otherwise.
+- Preserve existing comments while their code or section remains unless requested otherwise.
+- Do not create backups directly; use configured workflows.
+- Wrap Markdown containing fenced code blocks in an outer `~~~md` fence.
 
 ## Project Configuration
 
-- Use `agent-project` only when the user explicitly asks to inspect or change dotfiles project configuration.
-- Use `agent-project --help` for project configuration command syntax.
-- Discover available settings on demand with `agent-project schema [path]`.
-- Use `get` for one current value, `effective` for the full configuration, and `set` or `unset` to change settings. `unset` writes the current default value. Combine related changes in one command.
-- Do not read or edit `.ai/project.json` directly, except when the user explicitly asks to inspect the raw file or when debugging `agent-project` itself.
+- Use `agent-project` only when the user explicitly asks to inspect or change dotfiles project configuration, including when the workflow is disabled.
+- Discover syntax with `agent-project --help` and settings with `agent-project schema [path]`. Combine related changes in one command.
+- Do not read or edit `.ai/project.json` directly unless the user explicitly requests the raw file or you are debugging `agent-project` itself.
 
 ## Workflow
 
-Read-only Git commands may run directly. Do not directly run Git commands that modify the working tree, index, history, branches, or remote state. Use `git-workflow` for supported mutations; if an operation is unsupported, stop and report the workflow capability gap instead of bypassing it with raw Git.
+Read-only Git commands may run directly. Use supported `git-workflow` commands for every Git mutation to the working tree, index, history, branches, or remote state. For unsupported mutations, stop and report the workflow capability gap; never bypass it with raw Git.
 
-Use `git-workflow backup create` to preserve selected local changes before discarding them. Use `backup list` to inspect workflow backups, `backup apply <id>` only when the user explicitly wants to recover old changes, and `backup delete <id>` when the user explicitly wants to remove a backup. `prepare` backs up and discards selected changes; it never automatically applies a backup.
+Discover command syntax with `git-workflow --help` and command-specific `--help`.
 
-For an empty repository, run `git-workflow bootstrap --message "<message>" --all` before development. Development: prepare -> edit -> commit*. Delivery requires explicit user authorization. Use `git-workflow --help` for command syntax. Supported mutations: `bootstrap`, `prepare`, `sync`, `backup`, `commit`, `commit --amend`, `undo`, `restore`, `revert`, `cherry-pick`, `rebase`, `push`, `branch`, `remote`, `merge`, and `pr`.
+### Development
 
-For each new independent task, start a new branch before editing:
+- For an empty repository, run `git-workflow bootstrap` before development.
+- For each independent task, run `git-workflow prepare --branch-name <name>` before editing.
+- To explicitly continue work assigned to the checked-out working branch, run `git-workflow prepare --continue`. Neither the checked-out branch nor PR state establishes continuation intent. Explicit continuation may span multiple Task Specs and logical-subtask commits.
+- Follow `prepare -> edit -> commit*`. After each logical subtask, invoke `git-workflow commit --message "<message>" -- <paths>...` with a concise message. Use `--all` only when every change belongs to that subtask.
+- Shell enforces configured Commit and Push policies. Add `--override-manual` only for an explicitly requested commit or push.
+- For local base updates, use `git-workflow branch switch <base>`, then `git-workflow sync`.
+- If `prepare` reports `workflow-disabled`, stop using workflow commands for that work.
 
-```bash
-git-workflow prepare --branch-name <name>
-```
+Use repository naming conventions; otherwise use `<type>/<area>-<description>` for branches and `<type>(<area>): <summary>` for commits.
 
-To explicitly continue work already assigned to the checked-out working branch, run `git-workflow prepare --continue`. The checked-out branch alone does not establish continuation intent. This also applies when it has no PR or its PR is open, closed, or merged. An open PR can be updated with further commits and pushes after explicit continuation.
+### Backups
 
-To update an existing local base branch after remote changes, switch to it with `git-workflow branch switch <base>` and run `git-workflow sync`. Sync requires a clean working tree and remote tracking configuration, and advances the base only by fast-forward. It does not start or continue development work.
+Use `git-workflow backup create` to preserve selected changes before discarding them, and `backup list` to inspect backups. Use `backup apply <id>` only for explicitly requested recovery and `backup delete <id>` only for explicitly requested deletion. `prepare` backs up and discards selected changes; it never automatically applies a backup.
 
-If `prepare` reports `workflow-disabled`, do not use further workflow commands for that work.
+### Delivery
 
-A working branch may contain multiple Task Specs and logical-subtask commits when continuation is explicitly requested. A Task Spec does not authorize PR submission, merge, or integration.
+Each delivery action requires explicit user authorization:
 
-After each logical subtask, invoke `git-workflow commit` with its paths and a concise message:
+- `git-workflow pr submit`: only when explicitly asked to create, submit, or update a PR. It returns to the base; use `--stay` when asked to remain on the working branch.
+- `git-workflow pr merge`: only with separate explicit authorization to merge the PR (including "approve").
+- `git-workflow merge`: only with separate explicit authorization for local integration.
 
-```bash
-git-workflow commit --message "<message>" -- <paths>...
-```
+Task Spec or commit completion does not authorize PR submission or integration. Never infer merge authorization from PR submission, CI success, or task completion.
 
-- Run `git-workflow pr submit` only when the user explicitly asks to submit, create, or update a PR. It returns to the base; use `--stay` when remaining on the working branch is requested.
-- Run `git-workflow pr merge` only when the user explicitly authorizes merging the PR (including "approve").
-- Run `git-workflow merge` only when the user explicitly authorizes local integration.
-- Task Spec or commit completion does not authorize PR submission or integration. Never infer merge authorization from PR submission, CI success, or task completion.
-
-One logical subtask may touch multiple paths. Use `--all` only when all changes belong to that subtask. Add `--override-manual` only when the user explicitly requests the commit or push.
-
-Follow repository naming conventions, or default to:
-
-```text
-branch: <type>/<area>-<description>
-commit: <type>(<area>): <summary>
-```
-
-Surface each `[git]` result verbatim exactly once.
+Report failures and partial successes accurately. Surface each `[git]` result verbatim exactly once.

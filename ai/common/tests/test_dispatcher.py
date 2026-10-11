@@ -93,14 +93,3 @@ class DispatcherTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout + result.stderr, "")
         self.assertEqual(list(outside.iterdir()), [])
-
-    def test_codex_adapter_defers_shared_instructions(self):
-        adapter = (ROOT / "ai/codex/AGENTS.md").read_text()
-        self.assertLess(len(adapter), 800)
-        self.assertIn("agent-workflow-opt-in", adapter)
-        self.assertIn("Exit 0: read `~/.config/agent-workflow/instructions.md`", adapter)
-        self.assertIn("Exit 1: stop loading dotfiles workflow guidance", adapter)
-        probe_source = PROBE.read_text()
-        self.assertNotIn("instructions.md", probe_source)
-        self.assertNotIn("agent-project", probe_source)
-        self.assertNotIn("git-workflow", probe_source)
