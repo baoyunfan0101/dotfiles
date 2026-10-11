@@ -1706,6 +1706,127 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("branch=codex/legacy created=false", result.stdout)
         self.assertEqual(self.git_snapshot(), before)
 
+    def test_prepare_continue_skips_update_without_upstream(self):
+        self.save_settings(sync={"mode": "update"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        before = self.git_snapshot()
+        tracking = self.git("for-each-ref", "--format=%(upstream)",
+                            "refs/heads/feat/test")
+        self.assertEqual(tracking, "")
+
+        operations = self.root / "git-operations"
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            'case "$1" in fetch|pull|merge|rebase|push) '
+                            'printf "%s\\n" "$1" >> "$GIT_OPERATION_LOG";; esac\n'
+                            f'exec "{git_executable}" "$@"\n')
+        git_stub.chmod(0o755)
+        self.env["GIT_OPERATION_LOG"] = str(operations)
+
+        result = self.run_cli("prepare", "--continue")
+
+        self.assertEqual(result.stdout,
+                         "[git] prepare ok backup=none sync=skipped "
+                         "branch=feat/test created=false\n")
+        self.assertEqual(self.git_snapshot(), before)
+        self.assertEqual(self.git("for-each-ref", "--format=%(upstream)",
+                                  "refs/heads/feat/test"), tracking)
+        self.assertFalse(operations.exists())
+
+    def test_prepare_continue_skips_update_after_local_commit(self):
+        self.save_settings(sync={"mode": "update"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.git("add", "tracked")
+        self.git("commit", "-qm", "Local unpublished change")
+        before = self.git_snapshot()
+
+        result = self.run_cli("prepare", "--continue")
+
+        self.assertIn("sync=skipped branch=feat/test created=false", result.stdout)
+        self.assertEqual(self.git_snapshot(), before)
+        self.assertEqual(self.git("for-each-ref", "--format=%(upstream)",
+                                  "refs/heads/feat/test"), "")
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test"), "")
+
+    def test_prepare_continue_updates_configured_upstream_by_method(self):
+        for method in ("ffOnly", "rebase", "merge"):
+            with self.subTest(method=method):
+                self.save_settings(sync={"mode": "update", "updateMethod": method})
+                self.git("push", "-q", "origin", "main")
+                branch = f"feat/update-{method.lower()}"
+                self.run_cli("prepare", "--branch-name", branch)
+                self.git("push", "-qu", "origin", branch)
+                self.advance_remote_branch(branch)
+                remote_head = self.git("ls-remote", "--heads", "origin", branch).split()[0]
+                if method != "ffOnly":
+                    (self.repo / "local-note").write_text(f"local {method}\n")
+                    self.git("add", "local-note")
+                    self.git("commit", "-qm", "Local change")
+
+                result = self.run_cli("prepare", "--continue")
+
+                self.assertIn(f"sync=updated branch={branch} created=false", result.stdout)
+                self.assertEqual(self.git("branch", "--show-current"), branch)
+                self.assertEqual(self.git("merge-base", "--is-ancestor",
+                                          remote_head, "HEAD"), "")
+                self.assertEqual(self.git("for-each-ref", "--format=%(upstream:short)",
+                                          f"refs/heads/{branch}"), f"origin/{branch}")
+                self.git("switch", "main")
+
+    def test_prepare_continue_rejects_partial_upstream(self):
+        self.save_settings(sync={"mode": "update"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        for key, value in (("remote", "origin"), ("merge", "refs/heads/feat/test")):
+            with self.subTest(key=key):
+                self.git("config", f"branch.feat/test.{key}", value)
+                before = self.git_snapshot()
+                result = self.run_cli("prepare", "--continue", ok=False)
+                self.assertIn("invalid upstream configuration", result.stderr)
+                self.assertEqual(self.git_snapshot(), before)
+                self.git("config", "--unset", f"branch.feat/test.{key}")
+
+    def test_prepare_continue_rejects_invalid_upstream(self):
+        self.save_settings(sync={"mode": "update"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        for remote, merge, message in (
+            (".", "refs/heads/feat/test", "invalid upstream configuration"),
+            ("origin", "not-a-head", "invalid upstream configuration"),
+            ("missing", "refs/heads/feat/test", "upstream remote is unavailable"),
+            ("origin", "refs/heads/missing", "upstream branch is unavailable"),
+        ):
+            with self.subTest(remote=remote, merge=merge):
+                self.git("config", "branch.feat/test.remote", remote)
+                self.git("config", "branch.feat/test.merge", merge)
+                before = self.git_snapshot()
+                result = self.run_cli("prepare", "--continue", ok=False)
+                self.assertIn(message, result.stderr)
+                self.assertEqual(self.git_snapshot(), before)
+
+    def test_prepare_continue_without_upstream_keeps_backup_behavior(self):
+        self.save_settings(sync={"mode": "update"},
+                           backup={"mode": "tracked", "method": "stash"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        original_head = self.git("rev-parse", "HEAD")
+        self.change()
+        self.git("add", "tracked")
+
+        result = self.run_cli("prepare", "--continue")
+
+        self.assertIn("backup=stash sync=skipped branch=feat/test created=false",
+                      result.stdout)
+        self.assertEqual(self.git("branch", "--show-current"), "feat/test")
+        self.assertEqual(self.git("rev-parse", "HEAD"), original_head)
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertEqual((self.repo / "tracked").read_text(), "original\n")
+        self.assertTrue(self.git("stash", "list"))
+
     def test_prepare_does_not_implicitly_reuse_working_branch(self):
         self.prepare()
         self.change()
