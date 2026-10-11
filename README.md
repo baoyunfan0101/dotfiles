@@ -21,6 +21,7 @@ dotfiles/
       bin/                      Public command entry points
       libexec/git-workflow/      Command implementations
       lib/git-workflow/          Shared workflow libraries
+      lib/agent_project/         Configuration schema, persistence, and exclusion
       tests/                    Regression tests
     codex/                      Codex configuration and skills
 ```
@@ -78,20 +79,18 @@ Delivery                 -> explicit user authorization
 | `git-workflow pr submit [--stay]` | Create or update a PR when explicitly requested; return to its base unless `--stay` is set. |
 | `git-workflow pr merge` | Merge an existing PR when explicitly authorized. |
 | `git-workflow merge` | Integrate locally when explicitly authorized. |
-| `git-workflow push` | Explicit push; use `--rewrite` after a local published amend or rebase. An open PR's managed Summary is refreshed after a successful working-branch push. |
+| `git-workflow push` | Explicit push; use `--rewrite` after a local published amend or rebase. In pullRequest mode, a successful working-branch push refreshes an open PR's managed Summary. |
 | `git-workflow remote connect <url>` | Connect the local repository to a remote repository. |
 | `git-workflow remote reconnect <url>` | Change the existing remote repository connection. |
 | `git-workflow remote disconnect` | Remove the existing remote repository connection. |
 
 `prepare` verifies a persistent local backup before discarding selected changes. It never automatically applies or deletes that backup, including on failure. Use `backup apply <id>` only for explicit recovery onto the current working state.
 
-Bootstrap is a deliberate one-time operation for a newly initialized repository. It creates the initial root commit on the configured base branch and publishes that base before development branches are created. The remote must be empty. `--base` is optional only when exactly one base is configured; use `--all` to select all non-ignored files except `.ai/project.json`, or `-- <paths>...` to select paths. Bootstrap commits and pushes even when normal commits use manual mode. Afterward use `prepare -> edit -> commit*`; delivery still requires separate explicit authorization.
+Bootstrap creates and publishes the first commit in an empty repository. `--all` respects Git's effective ignore rules. Before development advances, `bootstrap --amend` can correct the published root commit using an exact remote lease; `bootstrap --retry-amend` recovers a failed publication. See [Project Settings](ai/project-settings.md) for the restrictions and recovery behavior.
 
-A working branch may contain multiple Task Specs and atomic commits. Task completion, PR submission, and CI success do not authorize merging. PR metadata covers all commits from base to working branch. If `prepare` reports `workflow-disabled`, stop using workflow commands for that work. See `git-workflow --help` and `git-workflow pr --help`.
+A working branch may contain multiple Task Specs and logical commits when continuation is explicitly requested. PR submission, merging, and local integration each require explicit authorization; task completion and CI success do not authorize merging.
 
-After a working-branch push, the workflow refreshes the Summary of an existing open PR while retaining other description sections and its title. A metadata warning never reverses a successful push. PR creation still requires `pr submit`.
-
-Existing Git branches need no registration. Delivery chooses `--base`, an existing PR's base, or the sole configured `git.branch.baseBranches` entry. Ambiguous bases require `--base`; configured base branches cannot be delivered.
+In pullRequest mode, successful working-branch pushes refresh an existing open PR's managed Summary while preserving its title and other sections. Metadata failures leave the successful push intact. PR creation requires `pr submit`.
 
 After a PR is merged remotely, use `git-workflow branch switch main` followed by `git-workflow sync` to update the local base. Sync requires a clean working tree and configured remote tracking. It succeeds when already current and rejects local history that cannot be fast-forwarded. `prepare` remains for starting or continuing development work.
 
@@ -113,6 +112,8 @@ Project settings can be managed through `agent-project`; agents discover setting
 
 `set` creates a complete `.ai/project.json` when needed. Existing project files keep their explicit settings even if built-in defaults change later. `unset` writes the current default value for a selected setting.
 
+`agent-project` keeps new `.ai/project.json` files local by adding `/.ai/project.json` to Git's repository-local `info/exclude` file. It never changes the project's `.gitignore`. Untracked local settings do not appear in published commits, clones, or forks. If the configuration is already tracked, Git continues tracking it; `agent-project` warns so its removal from the index can be handled explicitly.
+
 Inspect or change project settings with:
 
 ```bash
@@ -133,6 +134,8 @@ See [Project Settings](ai/project-settings.md) for the complete configuration re
 ```
 
 GitHub Actions runs the same test command for pull requests targeting `main`.
+
+Workflow tests are grouped by responsibility in `ai/common/tests/test_workflow_*.py` and share isolated fixtures in `workflow_helpers.py`. Run the group with `./test.sh workflow`, or a focused module such as `./test.sh workflow_prepare`.
 
 Tests use temporary homes, repositories, local bare remotes, isolated configuration directories, and a stubbed `gh`. Both installer modes run inside the sandbox, which is removed on exit. Tests do not install into the real user environment or contact GitHub.
 

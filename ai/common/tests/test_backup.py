@@ -107,6 +107,61 @@ class BackupTests(unittest.TestCase):
         self.git("restore", "--staged", "--worktree", ".")
         self.git("clean", "-fd")
 
+    def untrack_configuration(self):
+        self.git("rm", "--cached", ".ai/project.json")
+        self.git("commit", "-qm", "Keep configuration local")
+        (self.repo / ".git/info/exclude").write_text("/.ai/project.json\n")
+
+    def test_ignored_configuration_is_not_backed_up_as_untracked(self):
+        for method in ("stash", "commit"):
+            with self.subTest(method=method):
+                self.setUp()
+                self.set_backup(method, "untracked")
+                self.untrack_configuration()
+                (self.repo / "other").write_text("save me\n")
+                backup_id = self.create()
+                self.assertTrue((self.repo / ".ai/project.json").exists())
+                self.assertFalse((self.repo / "other").exists())
+                self.run_cli("backup", "apply", backup_id)
+                self.assertEqual((self.repo / "other").read_text(), "save me\n")
+                self.run_cli("backup", "delete", backup_id)
+                (self.repo / "other").unlink()
+
+    def test_explicitly_unignored_configuration_follows_backup_mode(self):
+        for method in ("stash", "commit"):
+            for mode in ("none", "tracked", "untracked", "all"):
+                with self.subTest(method=method, mode=mode):
+                    self.setUp()
+                    self.set_backup(method, mode)
+                    self.untrack_configuration()
+                    (self.repo / ".gitignore").write_text("!/.ai/project.json\n")
+                    self.git("add", ".gitignore")
+                    self.git("commit", "-qm", "Unignore configuration")
+                    result = self.run_cli("backup", "create")
+                    selected = mode in ("untracked", "all")
+                    self.assertEqual((self.repo / ".ai/project.json").exists(), not selected)
+                    if selected:
+                        backup_id = re.search(r"id=(b-[0-9a-f]{40,64})", result.stdout).group(1)
+                        self.run_cli("backup", "apply", backup_id)
+                        self.assertTrue((self.repo / ".ai/project.json").exists())
+                        self.run_cli("backup", "delete", backup_id)
+                    else:
+                        self.assertIn("skip reason=no-selected-changes", result.stdout)
+
+    def test_tracked_configuration_uses_tracked_backup_selection(self):
+        for method in ("stash", "commit"):
+            with self.subTest(method=method):
+                self.setUp()
+                self.set_backup(method, "tracked")
+                path = self.repo / ".ai/project.json"
+                original = path.read_text()
+                path.write_text(original + "\n")
+                backup_id = self.create()
+                self.assertEqual(path.read_text(), original)
+                self.run_cli("backup", "apply", backup_id)
+                self.assertEqual(path.read_text(), original + "\n")
+                self.run_cli("backup", "delete", backup_id)
+
     def test_manual_lifecycle_discards_then_applies(self):
         for method in ("stash", "commit"):
             with self.subTest(method=method):
@@ -197,6 +252,7 @@ class BackupTests(unittest.TestCase):
     def test_prepare_failure_retains_backup_without_applying(self):
         for method in ("stash", "commit"):
             with self.subTest(method=method):
+                self.config["git"]["sync"]["mode"] = "update"
                 self.set_backup(method)
                 self.selected_changes()
                 self.git("remote", "remove", "origin")
@@ -437,10 +493,12 @@ class BackupTests(unittest.TestCase):
         self.save_config()
         self.selected_changes()
         before = self.local_snapshot()
-        for action, args in (("create", ()), ("apply", ("b-" + "0" * 40,)),
-                             ("delete", ("b-" + "0" * 40,))):
+        for action, args in (("create", ()), ("delete", ("b-" + "0" * 40,))):
             self.assertIn("skip reason=workflow-disabled", self.run_cli("backup", action, *args).stdout)
             self.assertEqual(self.local_snapshot(), before)
+        self.assertIn("backup not found", self.run_cli("backup", "apply", "b-" + "0" * 40,
+                                                       ok=False).stderr)
+        self.assertEqual(self.local_snapshot(), before)
         for args in (("backup", "--help"), ("backup", "create", "--help"),
                      ("backup", "list", "--help"), ("backup", "apply", "--help"),
                      ("backup", "delete", "--help")):

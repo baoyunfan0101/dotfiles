@@ -10,20 +10,29 @@ requested_base=""
 message=""
 all=false
 message_set=false
+amend=false
+retry_amend=false
 paths=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --base) [[ $# -ge 2 && -n "$2" ]] || fail "missing value for --base"; requested_base="$2"; shift 2 ;;
     --message) [[ $# -ge 2 ]] || fail "missing value for --message"; message="$2"; message_set=true; shift 2 ;;
+    --amend) amend=true; shift ;;
+    --retry-amend) retry_amend=true; shift ;;
     --all) all=true; shift ;;
     --) shift; while [[ $# -gt 0 ]]; do paths+=("$1"); shift; done ;;
     -h|--help) usage; exit 0 ;;
     *) fail "unknown bootstrap option: $1" ;;
   esac
 done
-[[ "$message_set" == true && -n "$message" ]] || fail "--message is required"
-if [[ "$all" == true && ${#paths[@]} -gt 0 ]] || [[ "$all" != true && ${#paths[@]} -eq 0 ]]; then
-  fail "use --all or provide paths after --"
+if [[ "$retry_amend" == true ]]; then
+  [[ "$amend" != true && "$message_set" != true && "$all" != true && ${#paths[@]} -eq 0 ]] ||
+    fail "--retry-amend cannot include --amend, --message, or file selection"
+else
+  [[ "$message_set" == true && -n "$message" ]] || fail "--message is required"
+  if [[ "$all" == true && ${#paths[@]} -gt 0 ]] || [[ "$all" != true && ${#paths[@]} -eq 0 ]]; then
+    fail "use --all or provide paths after --"
+  fi
 fi
 preflight_core
 require_repository
@@ -34,7 +43,135 @@ fi
 BASE_BRANCHES_JSON="$(setting git.branch.baseBranches)"
 base="$(resolve_configured_base "$requested_base")"
 current="$(current_branch)"
-[[ "$current" == "$base" ]] || fail "unborn branch is $current; bootstrap requires the initial branch to match configured base $base"
+if [[ "$current" != "$base" ]]; then
+  if [[ "$amend" == true || "$retry_amend" == true ]]; then
+    fail "bootstrap amend requires the configured base branch $base; current branch is $current"
+  fi
+  fail "unborn branch is $current; bootstrap requires the initial branch to match configured base $base"
+fi
+
+require_root_commit() {
+  local sha="$1"
+  [[ "$(git rev-list --parents -n 1 "$sha")" == "$sha" &&
+     "$(git rev-list --count "$sha")" == 1 ]] ||
+    fail "bootstrap amend requires a single root commit"
+}
+
+validate_bootstrap_amend() {
+  local expected_remote_sha="$1"
+  local published_sha="${2:-}"
+  local local_refs remote_refs
+
+  [[ -z "$(git ls-files --unmerged)" ]] &&
+    ! git rev-parse --quiet --verify MERGE_HEAD >/dev/null 2>&1 &&
+    ! git rev-parse --quiet --verify CHERRY_PICK_HEAD >/dev/null 2>&1 &&
+    ! git rev-parse --quiet --verify REVERT_HEAD >/dev/null 2>&1 &&
+    ! git rev-parse --quiet --verify REBASE_HEAD >/dev/null 2>&1 &&
+    [[ ! -d "$(git rev-parse --git-path rebase-merge)" &&
+       ! -d "$(git rev-parse --git-path rebase-apply)" &&
+       ! -d "$(git rev-parse --git-path sequencer)" ]] ||
+    fail "finish or abort the current Git operation before bootstrap amend"
+
+  require_root_commit "$(git rev-parse --verify 'HEAD^{commit}')"
+  require_root_commit "$expected_remote_sha"
+  local_refs="$(git for-each-ref --format='%(refname)' refs/heads refs/tags)" ||
+    fail "cannot inspect local branches and tags"
+  [[ "$local_refs" == "refs/heads/$base" ]] ||
+    fail "bootstrap amend requires no other local branches or tags"
+
+  if ! remote="$(remote_for_branch "$base" 2>/dev/null)"; then
+    fail "no configured remote; connect one with git-workflow remote connect <url>"
+  fi
+  git remote get-url "$remote" >/dev/null 2>&1 || fail "configured remote is missing: $remote"
+  remote_refs="$(git ls-remote --heads --tags "$remote")" ||
+    fail "configured remote is inaccessible: $remote"
+  if [[ "$remote_refs" == "$expected_remote_sha"$'\t'"refs/heads/$base" ]]; then
+    BOOTSTRAP_REMOTE_SHA="$expected_remote_sha"
+  elif [[ -n "$published_sha" &&
+          "$remote_refs" == "$published_sha"$'\t'"refs/heads/$base" ]]; then
+    BOOTSTRAP_REMOTE_SHA="$published_sha"
+  else
+    if [[ -n "$published_sha" ]]; then
+      fail "remote must contain only the original root commit or recorded amended root commit on $base, with no other branches or tags"
+    fi
+    fail "remote must contain only the original root commit on $base, with no other branches or tags"
+  fi
+}
+
+publish_bootstrap_amend() {
+  local expected_remote_sha="$1"
+  local new_head="$2"
+
+  [[ "$(remote_branch_sha "$remote" "$base")" == "$expected_remote_sha" ]] ||
+    fail "remote branch changed since bootstrap amend"
+  git push --quiet "--force-with-lease=refs/heads/$base:$expected_remote_sha" \
+    "$remote" "$base:refs/heads/$base" ||
+    fail "amended root commit $new_head remains local; retry with git-workflow bootstrap --retry-amend"
+  [[ "$(remote_branch_sha "$remote" "$base")" == "$new_head" ]] ||
+    fail "cannot verify amended root commit on remote; retry with git-workflow bootstrap --retry-amend"
+  clear_rewrite "$base" "$remote"
+  printf '[git] bootstrap amend ok sha=%s base=%s remote=%s/%s\n' \
+    "${new_head:0:7}" "$base" "$remote" "$base"
+}
+
+if [[ "$amend" == true || "$retry_amend" == true ]]; then
+  if [[ "$retry_amend" == true ]]; then
+    if ! remote="$(remote_for_branch "$base" 2>/dev/null)"; then
+      fail "no configured remote; connect one with git-workflow remote connect <url>"
+    fi
+    pending_rewrite "$base" "$remote" || fail "no pending bootstrap amend for $base"
+    [[ "$REWRITE_EXPECTED" != "$REWRITE_HEAD" ]] ||
+      fail "invalid bootstrap amend rewrite record for $base"
+    [[ "$(git rev-parse --verify 'HEAD^{commit}')" == "$REWRITE_HEAD" ]] ||
+      fail "local HEAD differs from recorded bootstrap amend"
+    require_root_commit "$REWRITE_HEAD"
+    validate_bootstrap_amend "$REWRITE_EXPECTED" "$REWRITE_HEAD"
+    if [[ "$BOOTSTRAP_REMOTE_SHA" == "$REWRITE_HEAD" ]]; then
+      [[ "$(remote_branch_sha "$remote" "$base")" == "$REWRITE_HEAD" ]] ||
+        fail "remote branch changed since bootstrap amend"
+      clear_rewrite "$base" "$remote"
+      printf '[git] bootstrap amend ok sha=%s base=%s remote=%s/%s\n' \
+        "${REWRITE_HEAD:0:7}" "$base" "$remote" "$base"
+    else
+      publish_bootstrap_amend "$REWRITE_EXPECTED" "$REWRITE_HEAD"
+    fi
+    exit 0
+  fi
+
+  original_head="$(git rev-parse --verify 'HEAD^{commit}' 2>/dev/null)" ||
+    fail "bootstrap amend requires an existing root commit"
+  validate_bootstrap_amend "$original_head"
+  if pending_rewrite "$base" "$remote"; then
+    fail "pending bootstrap amend exists; retry with git-workflow bootstrap --retry-amend"
+  fi
+  original_index_tree="$(git write-tree)" || fail "cannot record index before bootstrap amend"
+  if [[ "$all" == true ]]; then
+    selected=(.)
+  else
+    selected=("${paths[@]}")
+  fi
+  git add -A -- "${selected[@]}" || restore_failed_amend_index "$original_index_tree"
+  original_message="$(git log -1 --format=%B)"
+  selection_changed=true
+  if git diff --cached --quiet HEAD -- "${selected[@]}"; then
+    selection_changed=false
+  else
+    diff_status=$?
+    [[ "$diff_status" == 1 ]] || restore_failed_amend_index "$original_index_tree"
+  fi
+  if [[ "$selection_changed" == false && "$message" == "$original_message" ]]; then
+    git read-tree "$original_index_tree" || fail "cannot restore index after unchanged bootstrap amend"
+    fail "bootstrap amend has no commit changes"
+  fi
+  git commit --quiet --amend --only -m "$message" -- "${selected[@]}" ||
+    restore_failed_amend_index "$original_index_tree"
+  new_head="$(git rev-parse HEAD)"
+  record_rewrite "$base" "$remote" "$original_head" "$new_head"
+  validate_bootstrap_amend "$original_head"
+  publish_bootstrap_amend "$original_head" "$new_head"
+  exit 0
+fi
+
 ! git rev-parse --verify HEAD^{commit} >/dev/null 2>&1 || fail "repository already contains commits"
 [[ -z "$(git for-each-ref --format='%(refname)' refs/heads)" ]] || fail "local branches already exist; refusing bootstrap"
 if ! remote="$(remote_for_branch "$base" 2>/dev/null)"; then
@@ -44,9 +181,9 @@ git remote get-url "$remote" >/dev/null 2>&1 || fail "configured remote is missi
 remote_refs="$(git ls-remote "$remote")" || fail "configured remote is inaccessible: $remote"
 [[ -z "$remote_refs" ]] || fail "remote repository is not empty: $remote"
 if [[ "$all" == true ]]; then
-  git add -A -- . ':(exclude).ai' || fail "could not stage initial files"
-  git diff --cached --quiet -- . ':(exclude).ai' && fail "initial commit contains no selected changes"
-  git commit --quiet --only -m "$message" -- . ':(exclude).ai' || fail "initial commit failed; staged data remains on unborn branch $base"
+  git add -A -- . || fail "could not stage initial files"
+  git diff --cached --quiet -- . && fail "initial commit contains no selected changes"
+  git commit --quiet --only -m "$message" -- . || fail "initial commit failed; staged data remains on unborn branch $base"
 else
   git add -A -- "${paths[@]}" || fail "could not stage selected initial files"
   git diff --cached --quiet -- "${paths[@]}" && fail "initial commit contains no selected changes"

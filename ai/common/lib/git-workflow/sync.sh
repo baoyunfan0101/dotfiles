@@ -7,7 +7,7 @@ fetch_base_for_entry() {
   local remote="$2"
   local base_ref="refs/remotes/$remote/$base_branch"
 
-  git fetch --quiet "$remote" "refs/heads/$base_branch:$base_ref" || return $?
+  git fetch --quiet "$remote" "+refs/heads/$base_branch:$base_ref" || return $?
   git rev-parse --verify "$base_ref^{commit}" >/dev/null || return $?
   printf '%s\n' "$base_ref"
 }
@@ -61,6 +61,11 @@ sync_current_branch() {
   local remote
   local upstream
   local original_head
+  local configured_remote=""
+  local configured_merge=""
+  local has_remote=false
+  local has_merge=false
+  local config_status
 
   case "$SYNC_MODE" in
     none)
@@ -72,11 +77,36 @@ sync_current_branch() {
       SYNC_RESULT="fetched"
       ;;
     update)
-      remote="$(remote_for_branch "$branch")" || return $?
-      upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+      if configured_remote="$(git config --get "branch.$branch.remote")"; then
+        has_remote=true
+      else
+        config_status=$?
+        [[ "$config_status" == 1 ]] || return "$config_status"
+      fi
+      if configured_merge="$(git config --get "branch.$branch.merge")"; then
+        has_merge=true
+      else
+        config_status=$?
+        [[ "$config_status" == 1 ]] || return "$config_status"
+      fi
 
-      if [[ -z "$upstream" ]]; then
-        printf 'current branch has no upstream: %s\n' "$branch" >&2
+      if [[ "$has_remote" == false && "$has_merge" == false ]]; then
+        SYNC_RESULT="skipped"
+        return 0
+      fi
+      if [[ "$has_remote" != true || "$has_merge" != true ||
+            -z "$configured_remote" || "$configured_remote" == "." ||
+            "$configured_merge" != refs/heads/?* ]]; then
+        printf 'invalid upstream configuration for %s; set both branch remote and merge ref\n' "$branch" >&2
+        return 1
+      fi
+      remote="$configured_remote"
+      if ! git remote get-url "$remote" >/dev/null 2>&1; then
+        printf 'upstream remote is unavailable for %s: %s\n' "$branch" "$remote" >&2
+        return 1
+      fi
+      if ! upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null)"; then
+        printf 'upstream branch is unavailable for %s; check branch tracking configuration\n' "$branch" >&2
         return 1
       fi
 

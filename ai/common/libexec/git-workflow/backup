@@ -52,7 +52,7 @@ esac
 
 preflight_core
 require_repository
-if ! project_workflow_enabled; then
+if [[ "$action" != apply ]] && ! project_workflow_enabled; then
   printf '[git] backup %s skip reason=workflow-disabled\n' "$action"
   exit 0
 fi

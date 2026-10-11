@@ -6,6 +6,8 @@ Usage:
   git-workflow prepare --continue
   git-workflow prepare [--base BRANCH] --branch-name NAME
   git-workflow bootstrap [--base BRANCH] --message MESSAGE (--all | -- PATH...)
+  git-workflow bootstrap [--base BRANCH] --amend --message MESSAGE (--all | -- PATH...)
+  git-workflow bootstrap [--base BRANCH] --retry-amend
   git-workflow sync
   git-workflow backup create
   git-workflow backup list
@@ -38,6 +40,8 @@ Commands:
 
   bootstrap
       Create and publish the initial commit on the configured base branch.
+      --amend corrects only that root commit with an exact remote lease;
+      --retry-amend republishes a locally amended root after a failed push.
 
   sync
       Fetch and fast-forward the checked-out configured base branch from its
@@ -99,7 +103,7 @@ Prepare options:
 
   --base BRANCH
       Configured base to use; defaults to the sole configured base. The base
-      is synchronized before branch creation.
+      follows git.sync.mode before branch creation.
 
   --continue
       Continue the checked-out working branch, including one with an open PR.
@@ -110,10 +114,17 @@ Bootstrap options:
       Configured base branch; defaults to the sole configured base.
 
   --message MESSAGE
-      Initial commit message.
+      Initial or amended root commit message.
+
+  --amend
+      Rewrite only the published initial root commit. Branch protection may
+      reject publication; ordinary base-branch amendments remain prohibited.
+
+  --retry-amend
+      Retry a recorded root-commit rewrite without creating another commit.
 
   --all | -- PATH...
-      Select all non-ignored files except .ai/project.json, or listed paths.
+      Select all non-ignored files, or listed paths.
 
 Commit options:
   --message MESSAGE

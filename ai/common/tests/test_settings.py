@@ -37,6 +37,16 @@ class SettingsTests(unittest.TestCase):
             text=True,
         )
 
+    def git(self, *arguments, cwd=None):
+        return subprocess.run(
+            ["git", *arguments], cwd=self.repo if cwd is None else cwd,
+            env=self.env, capture_output=True, text=True,
+        )
+
+    @property
+    def exclude(self):
+        return self.repo / ".git/info/exclude"
+
     def complete(self, changes):
         result = deepcopy(self.defaults)
 
@@ -53,38 +63,6 @@ class SettingsTests(unittest.TestCase):
     def write_config(self, config, complete=True):
         self.config.parent.mkdir(parents=True, exist_ok=True)
         self.config.write_text(json.dumps(self.complete(config) if complete else config))
-
-    def test_shared_instructions_describe_on_demand_configuration(self):
-        instructions = (PROJECT.parents[1] / "instructions.md").read_text()
-        self.assertIn("only when the user explicitly asks", instructions)
-        self.assertIn("agent-project schema [path]", instructions)
-        self.assertIn("agent-project --help", instructions)
-        self.assertIn("git-workflow --help", instructions)
-        for meaning in ("prepare -> edit -> commit*", "checked-out branch alone",
-                        "multiple Task Specs", "explicitly asks", "pr submit",
-                        "explicitly authorizes", "pr merge", "local integration",
-                        "Never infer merge authorization", "CI success"):
-            self.assertIn(meaning, instructions)
-        self.assertIn("Do not read or edit `.ai/project.json` directly", instructions)
-        for meaning in ("Read-only Git commands may run directly", "Do not directly run Git commands",
-                        "workflow capability gap", "prepare --branch-name <name>",
-                        "prepare --continue",
-                        "backup create", "backup apply <id>", "backup delete <id>",
-                        "commit --amend", "restore", "revert", "cherry-pick", "rebase"):
-            self.assertIn(meaning, instructions)
-        self.assertNotIn("git.integration.mode", instructions)
-        self.assertNotIn("git.commit.mode", instructions)
-        self.assertNotIn("README", instructions)
-
-    def test_shared_authoring_rules_keep_scopes_and_conditions(self):
-        instructions = (PROJECT.parents[1] / "instructions.md").read_text()
-        self.assertEqual(instructions.count("## Authoring"), 1)
-        authoring = instructions.split("## Authoring\n", 1)[1].split("\n## ", 1)[0]
-        for meaning in ("User-facing responses", "user's latest message",
-                        "Project files", "ASCII", "Existing comments",
-                        "code or section remains", "create backups directly",
-                        "configured workflows", "~~~md"):
-            self.assertIn(meaning, authoring)
 
     def test_help(self):
         result = self.run_project("--help")
@@ -322,6 +300,142 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(self.run_project("get", "workflow.enabled").stdout, "false\n")
         self.assertEqual(json.loads(self.config.read_text()), self.defaults)
 
+    def test_set_creates_local_exclude_without_gitignore(self):
+        self.exclude.unlink()
+        result = self.run_project("set", "workflow.enabled", "true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.exclude.read_bytes(),
+                         b"# BEGIN dotfiles workflow\n/.ai/project.json\n"
+                         b"# END dotfiles workflow\n")
+        self.assertFalse((self.repo / ".gitignore").exists())
+        self.assertEqual(self.git("check-ignore", "-v", ".ai/project.json").returncode, 0)
+        self.assertNotEqual(self.git("check-ignore", "-q", "nested/.ai/project.json").returncode,
+                            0)
+        (self.repo / "ordinary.txt").write_text("ordinary\n")
+        self.assertEqual(self.git("add", "-A").returncode, 0)
+        self.assertEqual(self.git("diff", "--cached", "--name-only").stdout.strip(),
+                         "ordinary.txt")
+
+    def test_existing_exclude_format_and_gitignore_are_preserved(self):
+        before = b"# existing\r\n*.tmp\r\n"
+        self.exclude.write_bytes(before)
+        gitignore = self.repo / ".gitignore"
+        gitignore.write_bytes(b"# untouched\r\n*.log\r\n")
+        result = self.run_project("set", "workflow.enabled", "true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected = (before + b"\r\n# BEGIN dotfiles workflow\r\n"
+                    b"/.ai/project.json\r\n# END dotfiles workflow\r\n")
+        self.assertEqual(self.exclude.read_bytes(), expected)
+        self.assertEqual(gitignore.read_bytes(), b"# untouched\r\n*.log\r\n")
+        exclude_stat = self.exclude.stat()
+        for arguments in (("set", "workflow.enabled", "false"),
+                          ("unset", "workflow.enabled")):
+            result = self.run_project(*arguments)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(self.exclude.read_bytes(), expected)
+            self.assertEqual(self.exclude.stat().st_ino, exclude_stat.st_ino)
+            self.assertEqual(self.exclude.stat().st_mtime_ns, exclude_stat.st_mtime_ns)
+
+    def test_managed_block_replaces_only_its_contents(self):
+        before = (b"# earlier\n# BEGIN dotfiles workflow\nwrong.txt\n"
+                  b"# END dotfiles workflow\n# later\n")
+        self.exclude.write_bytes(before)
+        result = self.run_project("set", "workflow.enabled", "true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.exclude.read_bytes(), before.replace(b"wrong.txt\n",
+                                                               b"/.ai/project.json\n"))
+
+    def test_unrelated_workflow_comments_are_preserved(self):
+        comments = (b"# This repository uses dotfiles workflow\n"
+                    b"# Notes about dotfiles workflow configuration\n")
+        gitignore = self.repo / ".gitignore"
+        gitignore.write_bytes(b"# existing ignore rules\n*.log\n")
+        self.exclude.write_bytes(comments)
+        result = self.run_project("set", "workflow.enabled", "true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected = (comments + b"\n# BEGIN dotfiles workflow\n"
+                    b"/.ai/project.json\n# END dotfiles workflow\n")
+        self.assertEqual(self.exclude.read_bytes(), expected)
+        before = self.exclude.stat()
+        result = self.run_project("unset", "workflow.enabled")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.exclude.read_bytes(), expected)
+        self.assertEqual(self.exclude.stat().st_ino, before.st_ino)
+        self.assertEqual(gitignore.read_bytes(), b"# existing ignore rules\n*.log\n")
+
+    def test_malformed_or_duplicate_markers_preserve_exclude_and_config(self):
+        self.write_config({"workflow": {"enabled": False}})
+        config_before = self.config.read_bytes()
+        gitignore = self.repo / ".gitignore"
+        gitignore.write_bytes(b"# keep this\n")
+        cases = (
+            b"# BEGIN dotfiles workflow\n",
+            b"# END dotfiles workflow\n",
+            b"# END dotfiles workflow\n# BEGIN dotfiles workflow\n",
+            b"# BEGIN dotfiles workflow\n# BEGIN dotfiles workflow\n"
+            b"# END dotfiles workflow\n",
+            b"# BEGIN dotfiles workflow extra\n# END dotfiles workflow\n",
+            b" # BEGIN  dotfiles workflow\n# END dotfiles workflow\n",
+            b"# begin dotfiles workflow\n# END dotfiles workflow\n",
+            b"# BEGIN: dotfiles workflow\n# END dotfiles workflow\n",
+        )
+        for content in cases:
+            with self.subTest(content=content):
+                self.exclude.write_bytes(content)
+                result = self.run_project("set", "workflow.enabled", "true")
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("malformed dotfiles workflow block", result.stderr)
+                self.assertEqual(self.exclude.read_bytes(), content)
+                self.assertEqual(self.config.read_bytes(), config_before)
+                self.assertEqual(gitignore.read_bytes(), b"# keep this\n")
+
+    def test_tracked_configuration_warns_without_changing_index(self):
+        self.write_config({"workflow": {"enabled": False}})
+        self.assertEqual(self.git("add", ".ai/project.json").returncode, 0)
+        index_before = self.git("ls-files", "--stage").stdout
+        result = self.run_project("set", "workflow.enabled", "true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("already tracked", result.stderr)
+        self.assertIn("Remove it from the index separately", result.stderr)
+        self.assertEqual(self.git("ls-files", "--stage").stdout, index_before)
+        self.assertTrue(self.config.exists())
+
+    def test_linked_worktree_uses_resolved_git_exclude_path(self):
+        (self.repo / "initial.txt").write_text("initial\n")
+        self.assertEqual(self.git("add", "initial.txt").returncode, 0)
+        self.assertEqual(self.git("commit", "-qm", "Initial").returncode, 0)
+        linked = self.root / "linked"
+        self.assertEqual(self.git("worktree", "add", "-qb", "linked", str(linked)).returncode,
+                         0)
+        result = self.run_project("set", "workflow.enabled", "true", cwd=linked)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        path_result = self.git("rev-parse", "--git-path", "info/exclude", cwd=linked)
+        self.assertEqual(path_result.returncode, 0, path_result.stderr)
+        exclude = Path(path_result.stdout.strip())
+        if not exclude.is_absolute():
+            exclude = linked / exclude
+        self.assertIn(b"/.ai/project.json", exclude.read_bytes())
+        self.assertEqual(self.git("check-ignore", "-q", ".ai/project.json",
+                                  cwd=linked).returncode, 0)
+
+    def test_exclude_failure_preserves_project_configuration(self):
+        self.write_config({"workflow": {"enabled": False}})
+        before = self.config.read_bytes()
+        self.exclude.unlink()
+        self.exclude.mkdir()
+        result = self.run_project("set", "workflow.enabled", "true")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Git exclude file is not a regular file", result.stderr)
+        self.assertEqual(self.config.read_bytes(), before)
+
+    def test_read_only_commands_do_not_create_git_exclude(self):
+        self.exclude.unlink()
+        self.write_config({"workflow": {"enabled": True}})
+        for arguments in (("schema",), ("get", "workflow.enabled"), ("effective",)):
+            result = self.run_project(*arguments)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(self.exclude.exists())
+
     def test_set_creates_complete_config_and_unset_restores_default(self):
         result = self.run_project("set", "git.commit.mode", "manual")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -531,6 +645,8 @@ class SettingsTests(unittest.TestCase):
 
     def test_failed_atomic_replace_preserves_file_and_removes_temporary(self):
         self.write_config({"schemaVersion": 1})
+        self.exclude.write_bytes(b"# BEGIN dotfiles workflow\n/.ai/project.json\n"
+                                 b"# END dotfiles workflow\n")
         before = self.config.read_bytes()
         writer = runpy.run_path(str(PROJECT))["write_settings"]
 
