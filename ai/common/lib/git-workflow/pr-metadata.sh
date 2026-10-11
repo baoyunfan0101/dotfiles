@@ -29,7 +29,6 @@ _sync_pr_after_push() {
   local branch="$2"
   local remote="$3"
   local previous_head="$4"
-  local selection
   local pr_url
   local base_branch
   local base_ref
@@ -39,18 +38,19 @@ _sync_pr_after_push() {
     pr_sync_failure "gh is unavailable; install it and run git-workflow push to retry"
     return
   fi
-  remote_url="$(git remote get-url "$remote")" || {
+  if ! git remote get-url "$remote" > "$temp/remote-url" 2> "$temp/error"; then
     pr_sync_failure "cannot resolve remote $remote for PR association"
     return
-  }
+  fi
+  IFS= read -r remote_url < "$temp/remote-url"
   if ! gh pr list --state open --head "$branch" --limit 1000 \
       --json url,baseRefName,body,headRepository > "$temp/prs.json" 2> "$temp/error"; then
     pr_sync_failure "cannot inspect open PRs; check gh authentication and retry git-workflow push"
     return
   fi
-  if selection="$(python3 "$PR_SUMMARY_HELPER" select "$temp/prs.json" \
-      "$temp/existing-body" "$remote_url" 2> "$temp/error")"; then
-    IFS=$'\t' read -r pr_url base_branch <<< "$selection"
+  if python3 "$PR_SUMMARY_HELPER" select "$temp/prs.json" \
+      "$temp/existing-body" "$remote_url" > "$temp/selection" 2> "$temp/error"; then
+    IFS=$'\t' read -r pr_url base_branch < "$temp/selection"
   else
     if [[ $? -eq 3 ]]; then
       PR_SYNC_STATUS=none
@@ -89,7 +89,8 @@ sync_pr_after_push() {
   PR_SYNC_STATUS=none
   PR_SYNC_REASON=""
   [[ -n "$previous_head" ]] || return 0
-  if ! temp="$(mktemp -d)"; then
+  temp="$(mktemp -d 2>/dev/null || true)"
+  if [[ -z "$temp" ]]; then
     pr_sync_failure "cannot create temporary PR metadata files"
   else
     _sync_pr_after_push "$temp" "$branch" "$remote" "$previous_head"
