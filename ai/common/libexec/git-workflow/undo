@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/mutation.sh"
+
+CURRENT_ACTION="undo"
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  [[ $# -eq 1 ]] || fail "usage: git-workflow undo"
+  usage
+  exit 0
+fi
+[[ $# -eq 0 ]] || fail "usage: git-workflow undo"
+
+preflight_core
+require_repository
+if ! project_workflow_enabled; then
+  printf '[git] undo skip reason=workflow-disabled\n'
+  exit 0
+fi
+
+branch="$(current_branch)"
+require_working_branch "$branch"
+if [[ -n "$(git ls-files --unmerged)" ]] ||
+    git rev-parse --quiet --verify MERGE_HEAD >/dev/null 2>&1 ||
+    git rev-parse --quiet --verify CHERRY_PICK_HEAD >/dev/null 2>&1 ||
+    git rev-parse --quiet --verify REVERT_HEAD >/dev/null 2>&1 ||
+    git rev-parse --quiet --verify REBASE_HEAD >/dev/null 2>&1 ||
+    [[ -d "$(git rev-parse --git-path rebase-merge)" ||
+       -d "$(git rev-parse --git-path rebase-apply)" ||
+       -d "$(git rev-parse --git-path sequencer)" ]]; then
+  fail "finish or abort the current Git operation before undo"
+fi
+require_clean_worktree
+
+removed="$(git rev-parse --verify 'HEAD^{commit}' 2>/dev/null)" || fail "no commit to undo"
+if git rev-parse --quiet --verify 'HEAD^2' >/dev/null 2>&1; then
+  fail "cannot undo a merge commit"
+fi
+parent="$(git rev-parse --verify 'HEAD^' 2>/dev/null)" || fail "cannot undo a root commit"
+load_commit_settings
+remote="$(remote_for_branch "$branch")"
+remote_sha="$(remote_branch_sha "$remote" "$branch")"
+verify_rewrite_source "$branch" "$remote" "$remote_sha" "$removed"
+
+git reset --mixed --quiet "$parent" || fail "undo failed; inspect local Git state"
+record_rewrite "$branch" "$remote" "$remote_sha" "$parent"
+
+remote_status=unchanged
+if [[ -n "$remote_sha" ]] && ! git merge-base --is-ancestor "$remote_sha" "$parent"; then
+  remote_status=pending
+  if [[ "$COMMIT_MODE" == autoCommitAndPush ]]; then
+    publish_rewrite "$branch" "$remote" "$remote_sha" ||
+      fail "undo retained locally but lease-safe push failed; retry with push --rewrite"
+    remote_status=updated
+  fi
+fi
+
+printf '[git] undo ok removed=%s head=%s remote=%s pr=%s\n' \
+  "$removed" "$parent" "$remote_status" "$PR_SYNC_STATUS"

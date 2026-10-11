@@ -22,7 +22,7 @@ Read-only Git commands may run directly. Do not directly run Git commands that m
 
 Use `git-workflow backup create` to preserve selected local changes before discarding them. Use `backup list` to inspect workflow backups, `backup apply <id>` only when the user explicitly wants to recover old changes, and `backup delete <id>` when the user explicitly wants to remove a backup. `prepare` backs up and discards selected changes; it never automatically applies a backup.
 
-For an empty repository, run `git-workflow bootstrap --message "<message>" --all` before development. Development: prepare -> edit -> commit*. Delivery requires explicit user authorization. Use `git-workflow --help` for command syntax. Supported mutations: `bootstrap`, `prepare`, `sync`, `backup`, `commit`, `commit --amend`, `restore`, `revert`, `cherry-pick`, `rebase`, `push`, `branch`, `remote`, `merge`, and `pr`.
+For an empty repository, run `git-workflow bootstrap --message "<message>" --all` before development. Development: prepare -> edit -> commit*. Delivery requires explicit user authorization. Use `git-workflow --help` for command syntax. Supported mutations: `bootstrap`, `prepare`, `sync`, `backup`, `commit`, `commit --amend`, `undo`, `restore`, `revert`, `cherry-pick`, `rebase`, `push`, `branch`, `remote`, `merge`, and `pr`.
 
 For each new independent task, start a new branch before editing:
 

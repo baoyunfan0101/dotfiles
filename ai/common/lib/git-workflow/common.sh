@@ -13,6 +13,7 @@ Usage:
   git-workflow backup delete <id>
   git-workflow commit [--override-manual] --message MESSAGE (--all | -- PATH...)
   git-workflow commit --amend [--message MESSAGE] (--all | -- PATH...)
+  git-workflow undo
   git-workflow restore [--source REF] -- PATH...
   git-workflow revert COMMIT
   git-workflow cherry-pick COMMIT
@@ -51,6 +52,10 @@ Commands:
       --amend rewrites the current working-branch HEAD. Published history can
       later be sent with push --rewrite when automatic pushing is disabled.
       Modes: manual skips; autoCommit stays local; autoCommitAndPush publishes.
+
+  undo
+      Remove the latest working-branch commit and leave its changes unstaged.
+      Published history uses a remote lease; retry with push --rewrite if needed.
 
   restore
       Restore selected tracked paths in the working tree from HEAD or a ref.

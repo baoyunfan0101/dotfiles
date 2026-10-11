@@ -463,14 +463,14 @@ class WorkflowTests(unittest.TestCase):
     def test_command_help_and_dispatch(self):
         help_text = self.run_cli("--help").stdout
         self.assertEqual(set(re.findall(r"^  ([a-z][a-z-]*)$", help_text, re.MULTILINE)),
-                         {"prepare", "bootstrap", "sync", "backup", "commit", "restore", "revert", "cherry-pick",
+                         {"prepare", "bootstrap", "sync", "backup", "commit", "undo", "restore", "revert", "cherry-pick",
                           "rebase", "merge", "push", "branch", "remote", "pr"})
         for meaning in ("before editing", "after editing", "--message MESSAGE",
                         "-- PATH...", "outside commit", "current branch",
                         "local", "pull request", "--branch-name NAME",
                         "manual skips", "autoCommit stays local", "autoCommitAndPush publishes"):
             self.assertIn(meaning, help_text)
-        for action in ("prepare", "bootstrap", "sync", "commit", "restore", "revert", "cherry-pick",
+        for action in ("prepare", "bootstrap", "sync", "commit", "undo", "restore", "revert", "cherry-pick",
                        "rebase", "merge", "push"):
             self.assertIn("Usage:", self.run_cli(action, "--help").stdout)
             self.assertIn(f"[git] {action} error", self.run_cli(action, "--invalid", ok=False).stderr)
@@ -504,6 +504,7 @@ class WorkflowTests(unittest.TestCase):
             ("backup", ("apply", "b-" + "0" * 40)),
             ("backup", ("delete", "b-" + "0" * 40)),
             ("commit", ("--message", "Change", "--all")),
+            ("undo", ()),
             ("push", ()),
             ("branch", ("create", "feat/disabled")),
             ("merge", ()),
@@ -517,7 +518,7 @@ class WorkflowTests(unittest.TestCase):
             )
 
     def test_command_executables(self):
-        for action in ("prepare", "bootstrap", "sync", "backup", "commit", "restore", "revert", "cherry-pick",
+        for action in ("prepare", "bootstrap", "sync", "backup", "commit", "undo", "restore", "revert", "cherry-pick",
                        "rebase", "merge", "push", "branch", "remote", "pr"):
             path = COMMON / "libexec/git-workflow" / action
             self.assertTrue(os.access(path, os.X_OK))
@@ -558,7 +559,7 @@ class WorkflowTests(unittest.TestCase):
         )
 
         installed = destination / ".local/bin/git-workflow"
-        for command in ("prepare", "bootstrap", "sync", "backup", "commit", "restore", "revert", "cherry-pick",
+        for command in ("prepare", "bootstrap", "sync", "backup", "commit", "undo", "restore", "revert", "cherry-pick",
                         "rebase", "push", "branch", "remote", "merge", "pr"):
             self.assertTrue(os.access(destination / ".local/libexec/git-workflow" / command, os.X_OK))
         for command in ("start", "finish"):
@@ -782,6 +783,230 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test").split()[0],
                          rewritten)
         self.assertIn("no recorded local rewrite", self.run_cli("push", "--rewrite", ok=False).stderr)
+
+    def test_undo_unpublished_commit_preserves_all_file_changes(self):
+        self.save_settings(commit={"mode": "autoCommit"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        (self.repo / "removed").write_text("old\n")
+        self.run_cli("commit", "--message", "Before", "--", "removed")
+        parent = self.git("rev-parse", "HEAD")
+        (self.repo / "tracked").write_text("modified\n")
+        (self.repo / "added").write_text("new\n")
+        (self.repo / "removed").unlink()
+        self.run_cli("commit", "--message", "Undo me", "--all")
+        removed = self.git("rev-parse", "HEAD")
+
+        result = self.run_cli("undo")
+
+        self.assertIn(f"removed={removed} head={parent} remote=unchanged", result.stdout)
+        self.assertEqual(self.git("rev-parse", "HEAD"), parent)
+        self.assertEqual(self.git("cat-file", "-t", removed), "commit")
+        self.assertIn(removed, self.git("reflog", "--format=%H", "-n", "3"))
+        self.assertEqual(self.git("diff", "--cached", "--name-only"), "")
+        self.assertEqual({line.strip() for line in self.git("status", "--porcelain").splitlines()},
+                         {"M tracked", "D removed", "?? added"})
+        self.assertEqual((self.repo / "tracked").read_text(), "modified\n")
+        self.assertEqual((self.repo / "added").read_text(), "new\n")
+        self.assertFalse((self.repo / "removed").exists())
+
+    def test_undo_unpublished_commit_does_not_create_remote_branch(self):
+        self.prepare()
+        self.change()
+        self.git("add", "tracked")
+        self.git("commit", "-qm", "Local only")
+        parent = self.git("rev-parse", "HEAD^")
+
+        result = self.run_cli("undo")
+
+        self.assertIn("remote=unchanged", result.stdout)
+        self.assertEqual(self.git("rev-parse", "HEAD"), parent)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test"), "")
+        self.assertEqual(self.git("status", "--porcelain"), "M tracked")
+
+    def test_undo_published_commit_auto_publishes_with_lease(self):
+        self.prepare()
+        self.change()
+        self.commit()
+        removed = self.git("rev-parse", "HEAD")
+        parent = self.git("rev-parse", "HEAD^")
+        log = self.root / "push.log"
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            f'if [[ "$1" == push ]]; then printf "%s\\n" "$*" >> "{log}"; fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        git_stub.chmod(0o755)
+
+        result = self.run_cli("undo")
+
+        self.assertIn(f"removed={removed} head={parent} remote=updated", result.stdout)
+        self.assertIn(f"--force-with-lease=refs/heads/feat/test:{removed}", log.read_text())
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test").split()[0], parent)
+        self.assertEqual(self.git("diff", "--cached", "--name-only"), "")
+        self.assertEqual(self.git("status", "--porcelain"), "M tracked")
+        self.assertIn("no recorded local rewrite", self.run_cli("push", "--rewrite", ok=False).stderr)
+
+    def test_undo_published_commit_auto_commit_retries_explicitly(self):
+        self.save_settings(commit={"mode": "autoCommit"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.commit()
+        self.run_cli("push")
+        removed = self.git("rev-parse", "HEAD")
+        parent = self.git("rev-parse", "HEAD^")
+
+        result = self.run_cli("undo")
+
+        self.assertIn("remote=pending", result.stdout)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test").split()[0], removed)
+        self.assertEqual(self.git("status", "--porcelain"), "M tracked")
+        self.assertIn("non-fast-forward", self.run_cli("push", ok=False).stderr)
+        self.assertIn("pr=none", self.run_cli("push", "--rewrite").stdout)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test").split()[0], parent)
+        self.assertEqual(self.git("status", "--porcelain"), "M tracked")
+
+    def test_undo_manual_never_publishes_without_override(self):
+        self.save_settings(commit={"mode": "manual"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.run_cli("commit", "--override-manual", "--message", "Manual", "--all")
+        self.run_cli("push", "--override-manual")
+        removed = self.git("rev-parse", "HEAD")
+        parent = self.git("rev-parse", "HEAD^")
+
+        self.assertIn("remote=pending", self.run_cli("undo").stdout)
+        self.assertIn("skip reason=manual", self.run_cli("push", "--rewrite").stdout)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test").split()[0], removed)
+        self.run_cli("push", "--rewrite", "--override-manual")
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test").split()[0], parent)
+        self.assertEqual(self.git("status", "--porcelain"), "M tracked")
+
+    def test_undo_rejects_dirty_worktree_and_in_progress_operation(self):
+        self.prepare()
+        self.change()
+        self.commit()
+        original = self.git("rev-parse", "HEAD")
+        (self.repo / "tracked").write_text("dirty\n")
+        self.assertIn("working tree must be clean", self.run_cli("undo", ok=False).stderr)
+        self.git("reset", "--hard", "HEAD")
+        (self.repo / "untracked").write_text("keep\n")
+        self.assertIn("working tree must be clean", self.run_cli("undo", ok=False).stderr)
+        (self.repo / "untracked").unlink()
+        (self.repo / "tracked").write_text("staged\n")
+        self.git("add", "tracked")
+        self.assertIn("working tree must be clean", self.run_cli("undo", ok=False).stderr)
+        self.git("reset", "--hard", "HEAD")
+        (self.repo / ".git/MERGE_HEAD").write_text(original + "\n")
+        self.assertIn("finish or abort", self.run_cli("undo", ok=False).stderr)
+        (self.repo / ".git/MERGE_HEAD").unlink()
+        self.assertEqual(self.git("rev-parse", "HEAD"), original)
+
+    def test_undo_rejects_base_detached_root_and_merge_commits(self):
+        self.assertIn("configured base branch", self.run_cli("undo", ok=False).stderr)
+        self.git("switch", "-c", "feat/root")
+        self.assertIn("root commit", self.run_cli("undo", ok=False).stderr)
+        self.git("switch", "--detach")
+        self.assertIn("detached HEAD", self.run_cli("undo", ok=False).stderr)
+        self.git("switch", "feat/root")
+        self.git("switch", "-c", "feat/side")
+        (self.repo / "side").write_text("side\n")
+        self.git("add", "side")
+        self.git("commit", "-qm", "Side")
+        self.git("switch", "feat/root")
+        self.git("merge", "--no-ff", "-m", "Merge side", "feat/side")
+        merged = self.git("rev-parse", "HEAD")
+        self.assertIn("merge commit", self.run_cli("undo", ok=False).stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), merged)
+
+    def test_undo_rejects_remote_advance_before_changing_local_history(self):
+        self.prepare()
+        self.change()
+        self.commit()
+        local_head = self.git("rev-parse", "HEAD")
+        self.advance_remote_branch("feat/test")
+        remote_head = self.git("ls-remote", "--heads", "origin", "feat/test").split()[0]
+
+        result = self.run_cli("undo", ok=False)
+
+        self.assertIn("remote branch has commits absent", result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), local_head)
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test").split()[0], remote_head)
+
+    def test_undo_failed_publication_keeps_changes_and_rewrite_record(self):
+        self.prepare()
+        self.change()
+        self.commit()
+        removed = self.git("rev-parse", "HEAD")
+        parent = self.git("rev-parse", "HEAD^")
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            'if [[ "$1" == push && "$*" == *--force-with-lease* ]]; then\n'
+                            '  exit 1\n'
+                            'fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        git_stub.chmod(0o755)
+
+        result = self.run_cli("undo", ok=False)
+
+        self.assertIn("retry with push --rewrite", result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), parent)
+        self.assertEqual(self.git("status", "--porcelain"), "M tracked")
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test").split()[0], removed)
+        git_stub.unlink()
+        self.assertIn("push ok", self.run_cli("push", "--rewrite").stdout)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test").split()[0], parent)
+
+    def test_undo_rewrite_rejects_remote_race_and_preserves_local_work(self):
+        self.prepare()
+        self.change()
+        self.commit()
+        removed = self.git("rev-parse", "HEAD")
+        parent = self.git("rev-parse", "HEAD^")
+        remote_advance = self.git("--git-dir", str(self.remote), "commit-tree",
+                                  f"{removed}^{{tree}}", "-p", removed,
+                                  "-m", "Concurrent remote update")
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            'if [[ "$1" == push && "$*" == *--force-with-lease* ]]; then\n'
+                            f'  "{git_executable}" --git-dir "{self.remote}" update-ref refs/heads/feat/test {remote_advance}\n'
+                            'fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        git_stub.chmod(0o755)
+
+        self.assertIn("lease-safe push failed", self.run_cli("undo", ok=False).stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), parent)
+        self.assertEqual(self.git("status", "--porcelain"), "M tracked")
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test").split()[0],
+                         remote_advance)
+
+    def test_undo_interoperates_with_pending_amend_and_rebase(self):
+        self.save_settings(commit={"mode": "autoCommit"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.commit()
+        self.run_cli("push")
+        published = self.git("rev-parse", "HEAD")
+        (self.repo / "tracked").write_text("amended\n")
+        self.run_cli("commit", "--amend", "--all")
+
+        self.assertIn("remote=pending", self.run_cli("undo").stdout)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test").split()[0],
+                         published)
+        self.run_cli("push", "--rewrite")
+        self.assertEqual(self.git("rev-parse", "origin/feat/test"), self.git("rev-parse", "HEAD"))
+        self.run_cli("commit", "--message", "Recommit", "--", "tracked")
+        self.run_cli("push")
+        self.advance_remote_branch("main")
+        self.assertIn("pushed=false", self.run_cli("rebase").stdout)
+        self.run_cli("push", "--rewrite")
+        self.assertEqual(self.git("rev-parse", "origin/feat/test"), self.git("rev-parse", "HEAD"))
 
     def test_manual_published_amend_requires_both_overrides(self):
         self.save_settings(commit={"mode": "manual"})
@@ -2094,6 +2319,86 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(body.endswith("\n\n## Notes\n\nKeep this note.\n"))
         self.assertEqual(self.git("rev-parse", "origin/feat/test"),
                          self.git("rev-parse", "HEAD"))
+
+    def test_undo_published_commit_updates_pr_summary_and_preserves_manual_content(self):
+        state_path = self.open_test_pr()
+        state = json.loads(state_path.read_text())
+        state["title"] = "Human title"
+        state["body"] += "\n\n## Notes\n\nKeep this note.\n"
+        state_path.write_text(json.dumps(state))
+        (self.repo / "second").write_text("second\n")
+        self.run_cli("commit", "--message", "Second", "--", "second")
+        self.assertIn("- Second", json.loads(state_path.read_text())["body"])
+        previous_calls = len(self.gh_calls())
+
+        result = self.run_cli("undo")
+
+        state = json.loads(state_path.read_text())
+        self.assertIn("remote=updated pr=updated", result.stdout)
+        self.assertEqual(state["title"], "Human title")
+        self.assertIn("- Change", state["body"])
+        self.assertNotIn("- Second", state["body"])
+        self.assertTrue(state["body"].endswith("\n\n## Notes\n\nKeep this note.\n"))
+        self.assertEqual(self.git("status", "--porcelain"), "?? second")
+        self.assertFalse(any(call[:2] in (["pr", "create"], ["pr", "close"], ["pr", "merge"])
+                             for call in self.gh_calls()[previous_calls:]))
+
+    def test_undo_auto_commit_rewrite_push_updates_pr_summary(self):
+        state_path = self.open_test_pr("autoCommit")
+        (self.repo / "second").write_text("second\n")
+        self.run_cli("commit", "--message", "Second", "--", "second")
+        self.run_cli("push")
+        self.assertIn("- Second", json.loads(state_path.read_text())["body"])
+
+        self.assertIn("remote=pending", self.run_cli("undo").stdout)
+        result = self.run_cli("push", "--rewrite")
+
+        self.assertIn("pr=updated", result.stdout)
+        body = json.loads(state_path.read_text())["body"]
+        self.assertIn("- Change", body)
+        self.assertNotIn("- Second", body)
+
+    def test_undo_only_pr_commit_leaves_open_pr_with_empty_summary(self):
+        state_path = self.open_test_pr()
+        previous_calls = len(self.gh_calls())
+
+        result = self.run_cli("undo")
+
+        state = json.loads(state_path.read_text())
+        self.assertIn("remote=updated pr=updated", result.stdout)
+        self.assertIn("## Summary\n\nNo commits relative to base.", state["body"])
+        self.assertNotIn("- Change", state["body"])
+        self.assertEqual(state["state"], "OPEN")
+        self.assertFalse(any(call[:2] in (["pr", "create"], ["pr", "close"], ["pr", "merge"])
+                             for call in self.gh_calls()[previous_calls:]))
+
+    def test_undo_pr_metadata_failure_preserves_successful_publication(self):
+        state_path = self.open_test_pr()
+        original_body = json.loads(state_path.read_text())["body"]
+        self.env["GH_FAIL"] = "pr edit"
+        removed = self.git("rev-parse", "HEAD")
+        parent = self.git("rev-parse", "HEAD^")
+
+        result = self.run_cli("undo")
+
+        self.assertIn("remote=updated pr=failed", result.stdout)
+        self.assertIn("pr sync warning", result.stderr)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test").split()[0], parent)
+        self.assertEqual(json.loads(state_path.read_text())["body"], original_body)
+        self.assertNotEqual(removed, parent)
+
+    def test_undo_in_local_merge_mode_never_calls_gh(self):
+        self.stub_gh()
+        self.save_settings(integration={"mode": "localMerge"})
+        self.git("push", "-q", "origin", "main")
+        self.prepare()
+        self.change()
+        self.commit()
+
+        result = self.run_cli("undo")
+
+        self.assertIn("remote=updated pr=none", result.stdout)
+        self.assertEqual(self.gh_calls(), [])
 
     def test_local_merge_explicit_push_works_without_gh(self):
         self.save_settings(integration={"mode": "localMerge"},

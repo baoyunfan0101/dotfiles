@@ -74,6 +74,7 @@ Delivery                 -> explicit user authorization
 | `git-workflow backup apply <id>` | Apply old changes to the current state while retaining the backup. |
 | `git-workflow backup delete <id>` | Delete one workflow backup. |
 | `git-workflow commit --message "<message>" -- <paths>...` | Record one logical subtask; Shell applies the configured commit and push policy. |
+| `git-workflow undo` | Remove the latest working-branch commit, leaving its changes unstaged; published history is updated safely according to Commit mode. |
 | `git-workflow pr submit [--stay]` | Create or update a PR when explicitly requested; return to its base unless `--stay` is set. |
 | `git-workflow pr merge` | Merge an existing PR when explicitly authorized. |
 | `git-workflow merge` | Integrate locally when explicitly authorized. |
