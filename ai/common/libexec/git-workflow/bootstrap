@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/mutation.sh"
+
+CURRENT_ACTION=bootstrap
+requested_base=""
+message=""
+all=false
+message_set=false
+paths=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --base) [[ $# -ge 2 && -n "$2" ]] || fail "missing value for --base"; requested_base="$2"; shift 2 ;;
+    --message) [[ $# -ge 2 ]] || fail "missing value for --message"; message="$2"; message_set=true; shift 2 ;;
+    --all) all=true; shift ;;
+    --) shift; while [[ $# -gt 0 ]]; do paths+=("$1"); shift; done ;;
+    -h|--help) usage; exit 0 ;;
+    *) fail "unknown bootstrap option: $1" ;;
+  esac
+done
+[[ "$message_set" == true && -n "$message" ]] || fail "--message is required"
+if [[ "$all" == true && ${#paths[@]} -gt 0 ]] || [[ "$all" != true && ${#paths[@]} -eq 0 ]]; then
+  fail "use --all or provide paths after --"
+fi
+preflight_core
+require_repository
+if ! project_workflow_enabled; then
+  printf '[git] bootstrap skip reason=workflow-disabled\n'
+  exit 0
+fi
+BASE_BRANCHES_JSON="$(setting git.branch.baseBranches)"
+base="$(resolve_configured_base "$requested_base")"
+current="$(current_branch)"
+[[ "$current" == "$base" ]] || fail "unborn branch is $current; bootstrap requires the initial branch to match configured base $base"
+! git rev-parse --verify HEAD^{commit} >/dev/null 2>&1 || fail "repository already contains commits"
+[[ -z "$(git for-each-ref --format='%(refname)' refs/heads)" ]] || fail "local branches already exist; refusing bootstrap"
+if ! remote="$(remote_for_branch "$base" 2>/dev/null)"; then
+  fail "no configured remote; connect one with git-workflow remote connect <url>"
+fi
+git remote get-url "$remote" >/dev/null 2>&1 || fail "configured remote is missing: $remote"
+remote_refs="$(git ls-remote "$remote")" || fail "configured remote is inaccessible: $remote"
+[[ -z "$remote_refs" ]] || fail "remote repository is not empty: $remote"
+if [[ "$all" == true ]]; then
+  git add -A -- . ':(exclude).ai' || fail "could not stage initial files"
+  git diff --cached --quiet -- . ':(exclude).ai' && fail "initial commit contains no selected changes"
+  git commit --quiet --only -m "$message" -- . ':(exclude).ai' || fail "initial commit failed; staged data remains on unborn branch $base"
+else
+  git add -A -- "${paths[@]}" || fail "could not stage selected initial files"
+  git diff --cached --quiet -- "${paths[@]}" && fail "initial commit contains no selected changes"
+  git commit --quiet -m "$message" -- "${paths[@]}" || fail "initial commit failed; staged data remains on unborn branch $base"
+fi
+commit_sha="$(git rev-parse HEAD)"
+if ! git push --quiet --set-upstream "$remote" "$base:refs/heads/$base"; then
+  fail "initial commit $commit_sha exists locally on $base but push failed; fix remote access and run git-workflow push to retry publishing the base"
+fi
+printf '[git] bootstrap ok sha=%s base=%s remote=%s/%s\n' "${commit_sha:0:7}" "$base" "$remote" "$base"

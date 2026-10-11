@@ -5,6 +5,7 @@ usage() {
 Usage:
   git-workflow prepare --continue
   git-workflow prepare --base BRANCH --branch-name NAME
+  git-workflow bootstrap [--base BRANCH] --message MESSAGE (--all | -- PATH...)
   git-workflow sync
   git-workflow backup create
   git-workflow backup list
@@ -33,6 +34,9 @@ Commands:
       Start new work before editing with --base and --branch-name. Explicitly
       continue the checked-out working branch with --continue. Selected local
       changes are backed up and discarded before preparation.
+
+  bootstrap
+      Create and publish the initial commit on the configured base branch.
 
   sync
       Fetch and fast-forward the checked-out configured base branch from its
@@ -91,6 +95,16 @@ Prepare options:
   --continue
       Continue the checked-out working branch, including one with an open PR.
       A working branch is never reused by prepare without this option.
+
+Bootstrap options:
+  --base BRANCH
+      Configured base branch; defaults to the sole configured base.
+
+  --message MESSAGE
+      Initial commit message.
+
+  --all | -- PATH...
+      Select all non-ignored files except .ai/project.json, or listed paths.
 
 Commit options:
   --message MESSAGE

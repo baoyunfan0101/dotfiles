@@ -214,7 +214,7 @@ This setting has no effect when `git.sync.mode` is `"none"` or `"fetch"`.
 
 ## Git backup
 
-Before synchronization or branch creation, `git-workflow prepare` saves and verifies a persistent local backup, then discards the selected changes. It does not automatically apply backups, even if preparation later fails. An unborn repository has no commit to back up against; its initial preparation retains files until an initial commit exists.
+Before synchronization or branch creation, `git-workflow prepare` saves and verifies a persistent local backup, then discards the selected changes. It does not automatically apply backups, even if preparation later fails. Bootstrap is the explicit initialization operation for an unborn repository and preserves all unselected files.
 
 ### `git.backup.mode`
 
@@ -306,7 +306,7 @@ Start an independent task with `git-workflow prepare --base <base> --branch-name
 
 Use `git-workflow sync` to update an existing, checked-out base branch from its configured remote tracking branch, such as after a PR has been merged remotely. The working tree must be clean. Sync fetches the remote state, fast-forwards the local base when possible, and succeeds without changing history when already current. It rejects ahead or diverged local history; it never merges or rebases. For a post-merge update, run `git-workflow branch switch main` and then `git-workflow sync`.
 
-In a genuinely empty repository, the configured base may be unborn. New work still requires explicit `--base` and `--branch-name`; `prepare` switches to the requested unborn working branch without creating a commit, and the first real commit is made there.
+For a genuinely empty repository, run `git-workflow bootstrap [--base <base>] --message "<initial message>" -- <paths>...` (or use `--all`) first. It commits selected files on the configured base and pushes that branch before any working branch is created. `--all` leaves `.ai/project.json` out of the initial commit so local workflow configuration remains intact. If several bases are configured, specify `--base`; the command rejects ambiguous configuration. This explicit operation runs in manual commit mode too. Then use the normal `prepare -> edit -> commit*` development flow. Direct ordinary commits to configured bases remain prohibited, and delivery still requires separate authorization.
 
 ### `git.branch.baseBranches`
 

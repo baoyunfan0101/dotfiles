@@ -45,7 +45,11 @@ build_backup_trees() {
   fi
 
   if [[ "$BACKUP_MODE" == untracked || "$BACKUP_MODE" == all ]]; then
-    git ls-files --others --exclude-standard -z > "$BACKUP_TMP/untracked"
+    git ls-files --others --exclude-standard -z > "$BACKUP_TMP/untracked-all"
+    while IFS= read -r -d '' path; do
+      [[ "$path" == ".ai/project.json" ]] && continue
+      printf '%s\0' "$path" >> "$BACKUP_TMP/untracked"
+    done < "$BACKUP_TMP/untracked-all"
     while IFS= read -r -d '' path; do
       [[ ! -d "$path" || -L "$path" ]] ||
         fail "cannot back up untracked directory: $path; local changes retained"
