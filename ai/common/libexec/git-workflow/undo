@@ -40,12 +40,56 @@ if git rev-parse --quiet --verify 'HEAD^2' >/dev/null 2>&1; then
 fi
 parent="$(git rev-parse --verify 'HEAD^' 2>/dev/null)" || fail "cannot undo a root commit"
 load_commit_settings
-remote="$(remote_for_branch "$branch")"
-remote_sha="$(remote_branch_sha "$remote" "$branch")"
-verify_rewrite_source "$branch" "$remote" "$remote_sha" "$removed"
+remote=""
+remote_sha=""
+configured_remote="$(git config --get "branch.$branch.remote" || true)"
+available_remotes="$(git remote)" || fail "cannot inspect configured remotes"
+if [[ -n "$available_remotes" ]] ||
+    [[ -n "$configured_remote" && "$configured_remote" != "." ]]; then
+  remote="$(remote_for_branch "$branch")"
+  remote_sha="$(remote_branch_sha "$remote" "$branch")" ||
+    fail "cannot inspect configured remote: $remote"
+  verify_rewrite_source "$branch" "$remote" "$remote_sha" "$removed"
+fi
+
+bases="$(python3 - "$BASE_BRANCHES_JSON" <<'PY'
+import json
+import sys
+
+bases = json.loads(sys.argv[1])
+if not bases:
+    sys.exit(1)
+print("\n".join(bases))
+PY
+)" || fail "cannot read configured base branches"
+while IFS= read -r base; do
+  local_base="refs/heads/$base"
+  if git rev-parse --verify "$local_base^{commit}" >/dev/null 2>&1; then
+    if git merge-base --is-ancestor "$removed" "$local_base"; then
+      fail "commit belongs to configured base branch: $base"
+    else
+      [[ $? -eq 1 ]] || fail "cannot verify configured base history: $base"
+    fi
+  elif [[ -z "$remote" ]]; then
+    fail "cannot verify configured base branch: $base"
+  fi
+  if [[ -n "$remote" ]]; then
+    base_remote="$(remote_for_branch "$base" "$branch")"
+    remote_base="refs/remotes/$base_remote/$base"
+    git fetch --quiet "$base_remote" "refs/heads/$base:$remote_base" ||
+      fail "cannot verify remote base history: $base"
+    if git merge-base --is-ancestor "$removed" "$remote_base"; then
+      fail "commit belongs to configured base branch: $base"
+    else
+      [[ $? -eq 1 ]] || fail "cannot verify remote base history: $base"
+    fi
+  fi
+done <<< "$bases"
 
 git reset --mixed --quiet "$parent" || fail "undo failed; inspect local Git state"
-record_rewrite "$branch" "$remote" "$remote_sha" "$parent"
+if [[ -n "$remote" ]]; then
+  record_rewrite "$branch" "$remote" "$remote_sha" "$parent"
+fi
 
 remote_status=unchanged
 if [[ -n "$remote_sha" ]] && ! git merge-base --is-ancestor "$remote_sha" "$parent"; then
