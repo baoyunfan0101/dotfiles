@@ -119,6 +119,16 @@ class WorkflowCliTests(WorkflowTestCase):
         for action in ("create", "list", "apply", "delete"):
             self.assertIn("Usage:", self.run_cli("backup", action, "--help", executable=installed).stdout)
         self.assertTrue((destination / ".local/lib/git-workflow/pr-summary.py").is_file())
+        self.assertTrue((destination / ".local/lib/git-workflow/rewrite.sh").is_file())
+        for name in ("__init__.py", "schema.py", "storage.py", "exclude.py"):
+            self.assertTrue((destination / ".local/lib/agent_project" / name).is_file())
+        project_library = destination / ".local/lib/agent_project"
+        help_env = {key: value for key, value in self.env.items()
+                    if key != "PYTHONDONTWRITEBYTECODE"}
+        result = subprocess.run([str(installed_project), "--help"], cwd=self.repo,
+                                env=help_env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((project_library / "__pycache__").exists())
         self.assertIn("[git] prepare ok", self.run_cli("prepare", "--base", "main", "--branch-name", "feat/test", executable=installed).stdout)
         for action in ("connect", "reconnect", "disconnect"):
             self.assertIn("Usage:", self.run_cli("remote", action, "--help", executable=installed).stdout)

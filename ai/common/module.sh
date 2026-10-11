@@ -21,5 +21,9 @@ module_path \
   "$HOME/.local/lib/git-workflow"
 
 module_path \
+  "lib/agent_project" \
+  "$HOME/.local/lib/agent_project"
+
+module_path \
   "instructions.md" \
   "$COMMON_CONFIG_DIR/instructions.md"

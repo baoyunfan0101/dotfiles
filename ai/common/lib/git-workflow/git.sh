@@ -83,3 +83,10 @@ push_branch() {
     git push --quiet --set-upstream "$remote" "$branch"
   fi
 }
+
+remote_branch_sha() {
+  local remote="$1"
+  local branch="$2"
+
+  git ls-remote --heads "$remote" "refs/heads/$branch" | cut -f1
+}
