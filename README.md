@@ -58,12 +58,14 @@ For an enabled repository:
 
 ```text
 Read-only task           -> no workflow command
+Repository bootstrap     -> bootstrap
 Development              -> prepare -> edit -> commit*
 Delivery                 -> explicit user authorization
 ```
 
 | Command | Meaning |
 |---|---|
+| `git-workflow bootstrap --message "<message>" -- <paths>...` | Create and publish the first commit on the configured base in an empty repository. |
 | `git-workflow prepare --base <base> --branch-name <name>` | Start an independent task on a new branch from the synchronized base. |
 | `git-workflow prepare --continue` | Explicitly continue the checked-out working branch. |
 | `git-workflow sync` | Fetch and fast-forward the checked-out configured base branch from its tracked remote branch. |
@@ -81,6 +83,8 @@ Delivery                 -> explicit user authorization
 | `git-workflow remote disconnect` | Remove the existing remote repository connection. |
 
 `prepare` verifies a persistent local backup before discarding selected changes. It never automatically applies or deletes that backup, including on failure. Use `backup apply <id>` only for explicit recovery onto the current working state.
+
+Bootstrap is a deliberate one-time operation for a newly initialized repository. It creates the initial root commit on the configured base branch and publishes that base before development branches are created. The remote must be empty. `--base` is optional only when exactly one base is configured; use `--all` to select all non-ignored files except `.ai/project.json`, or `-- <paths>...` to select paths. Bootstrap commits and pushes even when normal commits use manual mode. Afterward use `prepare -> edit -> commit*`; delivery still requires separate explicit authorization.
 
 A working branch may contain multiple Task Specs and atomic commits. Task completion, PR submission, and CI success do not authorize merging. PR metadata covers all commits from base to working branch. If `prepare` reports `workflow-disabled`, stop using workflow commands for that work. See `git-workflow --help` and `git-workflow pr --help`.
 

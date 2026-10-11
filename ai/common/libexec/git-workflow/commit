@@ -107,8 +107,8 @@ commit_changes() {
   esac
 
   branch="$(current_branch)"
+  require_working_branch "$branch"
   if [[ "$COMMIT_AMEND" == true ]]; then
-    require_working_branch "$branch"
     original_head="$(git rev-parse HEAD)"
     original_index_tree="$(git write-tree)" || fail "cannot record index before amend"
     remote="$(remote_for_branch "$branch")"
