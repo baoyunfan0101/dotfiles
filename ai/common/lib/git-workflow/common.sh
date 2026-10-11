@@ -67,7 +67,8 @@ Commands:
   push
       Auxiliary operation for an explicitly needed push outside commit: push
       the current branch according to project settings. --rewrite publishes a
-      recorded local amend or rebase with a remote lease.
+      recorded local amend or rebase with a remote lease. Working-branch pushes
+      refresh an existing open PR Summary; metadata failure does not undo a push.
 
   branch
       Create, switch, rename, or safely delete branches. See git-workflow
@@ -166,6 +167,7 @@ Commands:
       Create or update the open PR for the working branch and base, using
       complete branch history. Requires an explicit user request. Returns to
       the base branch after success; --stay retains the working branch.
+      Existing titles and content outside the managed Summary are preserved.
 
   merge
       Merge an existing open PR only with explicit user authorization, using

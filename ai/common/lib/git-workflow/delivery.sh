@@ -2,12 +2,12 @@ INTEGRATION_MERGE_METHOD=""
 DELETE_AFTER_INTEGRATION=false
 INTEGRATION_MESSAGE=""
 PR_TITLE=""
-PR_BODY=""
 INTEGRATION_BRANCH_DELETED=false
 DELIVERY_BASE=""
 PR_STAY=false
 
 source "$WORKFLOW_ROOT/lib/git-workflow/branch.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/mutation.sh"
 
 parse_delivery_args() {
   while [[ $# -gt 0 ]]; do

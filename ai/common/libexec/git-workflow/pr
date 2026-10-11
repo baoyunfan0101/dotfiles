@@ -26,13 +26,27 @@ if [[ "$PR_ACTION" == submit ]]; then
   git rev-parse --verify "$base_ref^{commit}" >/dev/null
   [[ "$(git rev-list --count "$base_ref..$working_branch")" != 0 ]] || fail "working branch has no commits to submit"
   PR_TITLE="$(branch_summary "$working_branch" "$base_ref")"
-  PR_BODY="$(printf '## Summary\n\n'; git log --reverse --format='- %s' "$base_ref..$working_branch")"
-  [[ -n "$PR_TITLE" && -n "$PR_BODY" ]] || fail "cannot derive PR metadata"
-  push_branch "$working_branch" "$base_branch"
-  if [[ -z "$pr_url" ]]; then
-    pr_url="$(gh pr create --base "$base_branch" --head "$working_branch" --title "$PR_TITLE" --body "$PR_BODY")"
+  [[ -n "$PR_TITLE" ]] || fail "cannot derive PR title"
+  pr_temp="$(mktemp -d)" || fail "cannot prepare PR metadata"
+  trap 'rm -rf -- "$pr_temp"' EXIT
+  if [[ -n "$pr_url" ]]; then
+    gh pr view "$pr_url" --json body > "$pr_temp/view.json" || fail "cannot read existing PR description"
+    python3 "$PR_SUMMARY_HELPER" extract "$pr_temp/view.json" "$pr_temp/existing-body" ||
+      fail "cannot read existing PR description"
   else
-    gh pr edit "$pr_url" --title "$PR_TITLE" --body "$PR_BODY" >/dev/null
+    : > "$pr_temp/existing-body"
+  fi
+  previous_remote_sha="$(remote_branch_sha "$remote" "$working_branch")"
+  render_pr_body "$pr_temp" "$base_ref" "$previous_remote_sha" "$working_branch" \
+    "$pr_temp/existing-body" "$pr_temp/updated-body" || fail "cannot update PR Summary safely"
+  push_branch "$working_branch" "$base_branch" || fail "PR branch push failed"
+  if [[ -z "$pr_url" ]]; then
+    pr_url="$(gh pr create --base "$base_branch" --head "$working_branch" \
+      --title "$PR_TITLE" --body-file "$pr_temp/updated-body")" ||
+      fail "PR branch was pushed but PR creation failed; working branch retained"
+  elif ! cmp -s "$pr_temp/existing-body" "$pr_temp/updated-body"; then
+    gh pr edit "$pr_url" --body-file "$pr_temp/updated-body" >/dev/null ||
+      fail "PR branch was pushed but description update failed; working branch retained"
   fi
   if [[ "$PR_STAY" != true ]]; then
     if ! git checkout -q "$base_branch"; then

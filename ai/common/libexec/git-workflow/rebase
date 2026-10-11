@@ -57,5 +57,5 @@ if [[ "$COMMIT_MODE" == autoCommitAndPush && "$new_head" != "$original_head" ]];
 else
   pushed=false
 fi
-printf '[git] rebase ok base=%s sha=%s branch=%s pushed=%s\n' \
-  "$base" "${new_head:0:7}" "$branch" "$pushed"
+printf '[git] rebase ok base=%s sha=%s branch=%s pushed=%s pr=%s\n' \
+  "$base" "${new_head:0:7}" "$branch" "$pushed" "$PR_SYNC_STATUS"
