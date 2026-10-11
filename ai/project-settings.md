@@ -311,6 +311,8 @@ Use `git-workflow sync` to update an existing, checked-out base branch from its 
 
 For a genuinely empty repository, run `git-workflow bootstrap [--base <base>] --message "<initial message>" -- <paths>...` (or use `--all`) first. It commits selected files on the configured base and pushes that branch before any working branch is created. `--all` leaves `.ai/project.json` out of the initial commit so local workflow configuration remains intact. If several bases are configured, specify `--base`; the command rejects ambiguous configuration. This explicit operation runs in manual commit mode too. Then use the normal `prepare -> edit -> commit*` development flow. Direct ordinary commits to configured bases remain prohibited, and delivery still requires separate authorization.
 
+Before development advances, `git-workflow bootstrap --amend --message "Initial commit" --all` can correct the single published root commit. The command requires the base to be the only local and remote branch, with no tags, and uses an exact remote lease. Branch protection may reject the rewritten commit. A failed publication leaves the amended commit local and can be retried with `git-workflow bootstrap --retry-amend`; ordinary base-branch amendments remain prohibited.
+
 ### `git.branch.baseBranches`
 
 Defines the bases allowed for new work and delivery.

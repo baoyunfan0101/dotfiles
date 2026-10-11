@@ -87,6 +87,8 @@ Delivery                 -> explicit user authorization
 
 Bootstrap is a deliberate one-time operation for a newly initialized repository. It creates the initial root commit on the configured base branch and publishes that base before development branches are created. The remote must be empty. `--base` is optional only when exactly one base is configured; use `--all` to select all non-ignored files except `.ai/project.json`, or `-- <paths>...` to select paths. Bootstrap commits and pushes even when normal commits use manual mode. Afterward use `prepare -> edit -> commit*`; delivery still requires separate explicit authorization.
 
+To correct that published root commit before any other branch, tag, or commit exists, use `git-workflow bootstrap --amend --message "Initial commit" --all` (or select paths after `--`). This rewrites remote history using an exact lease and may be rejected by branch protection. If publication fails, the amended commit stays local; retry with `git-workflow bootstrap --retry-amend`. Ordinary base-branch amendments remain prohibited.
+
 A working branch may contain multiple Task Specs and atomic commits. Task completion, PR submission, and CI success do not authorize merging. PR metadata covers all commits from base to working branch. If `prepare` reports `workflow-disabled`, stop using workflow commands for that work. See `git-workflow --help` and `git-workflow pr --help`.
 
 After a working-branch push, the workflow refreshes the Summary of an existing open PR while retaining other description sections and its title. A metadata warning never reverses a successful push. PR creation still requires `pr submit`.
