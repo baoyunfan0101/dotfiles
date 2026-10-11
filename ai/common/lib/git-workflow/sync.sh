@@ -7,7 +7,7 @@ fetch_base_for_entry() {
   local remote="$2"
   local base_ref="refs/remotes/$remote/$base_branch"
 
-  git fetch --quiet "$remote" "refs/heads/$base_branch:$base_ref" || return $?
+  git fetch --quiet "$remote" "+refs/heads/$base_branch:$base_ref" || return $?
   git rev-parse --verify "$base_ref^{commit}" >/dev/null || return $?
   printf '%s\n' "$base_ref"
 }

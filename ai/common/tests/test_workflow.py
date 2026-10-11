@@ -511,7 +511,6 @@ class WorkflowTests(unittest.TestCase):
             ("bootstrap", ("--message", "Initial", "--all")),
             ("sync", ()),
             ("backup", ("create",)),
-            ("backup", ("apply", "b-" + "0" * 40)),
             ("backup", ("delete", "b-" + "0" * 40)),
             ("commit", ("--message", "Change", "--all")),
             ("undo", ()),
@@ -526,6 +525,8 @@ class WorkflowTests(unittest.TestCase):
                 result.stdout,
                 f"[git] {action + ' ' + arguments[0] if action in ('pr', 'branch', 'backup') else action} skip reason=workflow-disabled\n",
             )
+        self.assertIn("backup not found", self.run_cli("backup", "apply",
+                                                       "b-" + "0" * 40, ok=False).stderr)
 
     def test_command_executables(self):
         for action in ("prepare", "bootstrap", "sync", "backup", "commit", "undo", "restore", "revert", "cherry-pick",
@@ -1518,6 +1519,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_bootstrap_commits_and_publishes_base_before_development(self):
         self.unborn_repo()
+        (self.repo / ".git/info/exclude").write_text("/.ai/project.json\n")
         self.settings(commit={"mode": "autoCommitAndPush"})
         (self.repo / "README.md").write_bytes(b"initial project\n")
         (self.repo / "staged.txt").write_bytes(b"staged\n")
@@ -1557,7 +1559,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("run git-workflow bootstrap", result.stderr)
         self.assertEqual(before, self.git_snapshot())
 
-    def test_bootstrap_manual_mode_and_repeated_attempt(self):
+    def test_bootstrap_all_includes_staged_configuration(self):
         self.unborn_repo()
         self.settings(commit={"mode": "manual"})
         (self.repo / "README.md").write_text("initial\n")
@@ -1565,13 +1567,36 @@ class WorkflowTests(unittest.TestCase):
         result = self.run_cli("bootstrap", "--message", "Initial", "--all")
         self.assertIn("bootstrap ok", result.stdout)
         self.assertTrue((self.repo / ".ai/project.json").exists())
-        self.assertEqual(self.git("ls-tree", "-r", "--name-only", "HEAD"), "README.md")
-        self.assertEqual(self.git("diff", "--cached", "--name-only"), ".ai/project.json")
+        self.assertEqual(self.git("ls-tree", "-r", "--name-only", "HEAD"),
+                         ".ai/project.json\nREADME.md")
+        self.assertEqual(self.git("diff", "--cached", "--name-only"), "")
         self.assertNotEqual(self.git("ls-remote", "--heads", "origin", "main"), "")
         self.assertIn("already contains commits", self.run_cli("bootstrap", "--message", "Again", "--all", ok=False).stderr)
 
+    def test_bootstrap_all_follows_local_exclude_and_includes_other_ai_files(self):
+        self.unborn_repo()
+        (self.repo / ".git/info/exclude").write_text("/.ai/project.json\n")
+        (self.repo / ".ai/notes.txt").write_text("shareable\n")
+        (self.repo / "README.md").write_text("initial\n")
+        self.run_cli("bootstrap", "--message", "Initial", "--all")
+        self.assertEqual(self.git("ls-tree", "-r", "--name-only", "HEAD"),
+                         ".ai/notes.txt\nREADME.md")
+        self.assertTrue((self.repo / ".ai/project.json").exists())
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", "main").split()[0],
+                         self.git("rev-parse", "HEAD"))
+
+    def test_bootstrap_all_respects_explicit_gitignore_override(self):
+        self.unborn_repo()
+        (self.repo / ".git/info/exclude").write_text("/.ai/project.json\n")
+        (self.repo / ".gitignore").write_text("!/.ai/project.json\n")
+        (self.repo / "README.md").write_text("initial\n")
+        self.run_cli("bootstrap", "--message", "Initial", "--all")
+        self.assertIn(".ai/project.json",
+                      self.git("ls-tree", "-r", "--name-only", "HEAD").splitlines())
+
     def test_bootstrap_validates_empty_selection_base_and_remote(self):
         self.unborn_repo(head="develop")
+        (self.repo / ".git/info/exclude").write_text("/.ai/project.json\n")
         (self.repo / "README.md").write_text("initial\n")
         self.settings(branch={"baseBranches": ["main", "develop"]})
         before = self.git_snapshot()
@@ -1679,13 +1704,14 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual((self.repo / "other.txt").read_text(), "unselected change\n")
         self.assertIn("M\tother.txt", self.git("diff", "--cached", "--name-status"))
 
-    def test_bootstrap_amend_all_excludes_local_configuration(self):
+    def test_bootstrap_amend_all_includes_staged_configuration(self):
         self.bootstrapped_root()
         self.git("add", ".ai/project.json")
         (self.repo / "README.md").write_text("corrected\n")
         self.run_cli("bootstrap", "--amend", "--message", "Initial", "--all")
-        self.assertEqual(self.git("ls-tree", "-r", "--name-only", "HEAD"), "README.md")
-        self.assertEqual(self.git("diff", "--cached", "--name-only"), ".ai/project.json")
+        self.assertEqual(self.git("ls-tree", "-r", "--name-only", "HEAD"),
+                         ".ai/project.json\nREADME.md")
+        self.assertEqual(self.git("diff", "--cached", "--name-only"), "")
 
     def test_bootstrap_amend_rejects_non_base_and_advanced_base(self):
         self.bootstrapped_root()
@@ -2637,7 +2663,7 @@ class WorkflowTests(unittest.TestCase):
                       self.run_cli("branch", "delete", "feat/unmerged", ok=False).stderr)
         self.assertEqual(self.git_snapshot(), before)
 
-    def assert_prepare_explicit_base_starts_from_latest_base(self, sync_mode):
+    def assert_prepare_explicit_base_uses_sync_mode(self, sync_mode):
         self.save_settings(sync={"mode": sync_mode, "updateMethod": "ffOnly"})
         self.git("push", "-q", "origin", "main")
         self.prepare()
@@ -2652,22 +2678,115 @@ class WorkflowTests(unittest.TestCase):
 
         result = self.run_cli("prepare", "--base", "main", "--branch-name", "feat/next")
         self.assertIn("branch=feat/next created=true", result.stdout)
+        self.assertIn(f"sync={dict(none='skipped', fetch='fetched', update='updated')[sync_mode]}",
+                      result.stdout)
         self.assertEqual(self.git("branch", "--show-current"), "feat/next")
-        self.assertEqual(self.git("rev-parse", "HEAD"), remote_tip)
-        self.assertEqual(self.git("rev-parse", "main"), remote_tip)
+        expected_head = remote_tip if sync_mode == "update" else old_main
+        self.assertEqual(self.git("rev-parse", "HEAD"), expected_head)
+        self.assertEqual(self.git("rev-parse", "main"), expected_head)
+        self.assertEqual(self.git("rev-parse", "origin/main"),
+                         old_main if sync_mode == "none" else remote_tip)
         self.assertEqual(self.git("rev-parse", "feat/test"), old_branch_head)
         self.assertFalse((self.repo / "user-note").exists())
         self.assertTrue(self.git("stash", "list"))
         self.assertEqual(self.git("status", "--porcelain"), "")
 
-    def test_prepare_explicit_base_starts_from_latest_base_when_sync_none(self):
-        self.assert_prepare_explicit_base_starts_from_latest_base("none")
+    def test_prepare_explicit_base_uses_local_base_when_sync_none(self):
+        self.assert_prepare_explicit_base_uses_sync_mode("none")
 
-    def test_prepare_explicit_base_starts_from_latest_base_when_sync_fetch(self):
-        self.assert_prepare_explicit_base_starts_from_latest_base("fetch")
+    def test_prepare_explicit_base_fetches_without_advancing_base(self):
+        self.assert_prepare_explicit_base_uses_sync_mode("fetch")
 
     def test_prepare_explicit_base_starts_from_latest_base_when_sync_update(self):
-        self.assert_prepare_explicit_base_starts_from_latest_base("update")
+        self.assert_prepare_explicit_base_uses_sync_mode("update")
+
+    def test_prepare_explicit_base_none_works_offline_without_fetch(self):
+        self.save_settings(sync={"mode": "none"})
+        base_head = self.git("rev-parse", "main")
+        self.git("remote", "remove", "origin")
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            'if [[ "$1" == fetch || "$1" == ls-remote ]]; then exit 1; fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        git_stub.chmod(0o755)
+        result = self.run_cli("prepare", "--branch-name", "feat/offline")
+        self.assertIn("sync=skipped", result.stdout)
+        self.assertEqual(self.git("rev-parse", "HEAD"), base_head)
+
+    def test_prepare_explicit_base_fetch_allows_divergence(self):
+        self.save_settings(sync={"mode": "fetch"})
+        self.git("push", "-q", "origin", "main")
+        base_head, remote_head = self.diverge_main_with_conflict()
+        result = self.run_cli("prepare", "--branch-name", "feat/diverged")
+        self.assertIn("sync=fetched", result.stdout)
+        self.assertEqual(self.git("rev-parse", "HEAD"), base_head)
+        self.assertEqual(self.git("rev-parse", "main"), base_head)
+        self.assertEqual(self.git("rev-parse", "origin/main"), remote_head.split()[0])
+
+    def test_prepare_fetch_refreshes_rewritten_remote_base_without_moving_local_base(self):
+        self.save_settings(sync={"mode": "fetch"})
+        self.git("push", "-q", "origin", "main")
+        local_base = self.git("rev-parse", "main")
+        rewritten = self.git("--git-dir", str(self.remote), "commit-tree",
+                             "main^{tree}", "-m", "Rewritten remote base")
+        self.git("--git-dir", str(self.remote), "update-ref", "refs/heads/main",
+                 rewritten)
+
+        result = self.run_cli("prepare", "--branch-name", "feat/rewritten-fetch")
+
+        self.assertIn("sync=fetched", result.stdout)
+        self.assertEqual(self.git("branch", "--show-current"), "feat/rewritten-fetch")
+        self.assertEqual(self.git("rev-parse", "HEAD"), local_base)
+        self.assertEqual(self.git("rev-parse", "main"), local_base)
+        self.assertEqual(self.git("rev-parse", "origin/main"), rewritten)
+
+    def test_prepare_update_rejects_rewritten_remote_base_and_retains_backup(self):
+        self.save_settings(sync={"mode": "update"})
+        self.git("push", "-q", "origin", "main")
+        local_base = self.git("rev-parse", "main")
+        rewritten = self.git("--git-dir", str(self.remote), "commit-tree",
+                             "main^{tree}", "-m", "Rewritten remote base")
+        self.git("--git-dir", str(self.remote), "update-ref", "refs/heads/main",
+                 rewritten)
+        (self.repo / "user-note").write_text("protected\n")
+
+        result = self.run_cli("prepare", "--branch-name", "feat/rewritten-update",
+                              ok=False)
+
+        self.assertIn("local base diverged", result.stderr)
+        self.assertIn("backup retained", result.stderr)
+        self.assertEqual(self.git("branch", "--show-current"), "main")
+        self.assertEqual(self.git("rev-parse", "HEAD"), local_base)
+        self.assertEqual(self.git("rev-parse", "main"), local_base)
+        self.assertEqual(self.git("rev-parse", "origin/main"), rewritten)
+        self.assertEqual(self.git("branch", "--list", "feat/rewritten-update"), "")
+        self.assertFalse((self.repo / "user-note").exists())
+        self.assertTrue(self.git("stash", "list"))
+
+    def test_prepare_none_ignores_rewritten_remote_base(self):
+        self.save_settings(sync={"mode": "none"})
+        self.git("push", "-q", "origin", "main")
+        local_base = self.git("rev-parse", "main")
+        rewritten = self.git("--git-dir", str(self.remote), "commit-tree",
+                             "main^{tree}", "-m", "Rewritten remote base")
+        self.git("--git-dir", str(self.remote), "update-ref", "refs/heads/main",
+                 rewritten)
+        git_executable = shutil.which("git")
+        git_stub = self.bin / "git"
+        git_stub.write_text('#!/usr/bin/env bash\n'
+                            'if [[ "$1" == fetch || "$1" == ls-remote ]]; then exit 1; fi\n'
+                            f'exec "{git_executable}" "$@"\n')
+        git_stub.chmod(0o755)
+
+        result = self.run_cli("prepare", "--branch-name", "feat/rewritten-offline")
+
+        self.assertIn("sync=skipped", result.stdout)
+        self.assertEqual(self.git("rev-parse", "HEAD"), local_base)
+        self.assertEqual(self.git("rev-parse", "main"), local_base)
+        self.assertEqual(self.git("rev-parse", "origin/main"), local_base)
+        self.assertEqual(self.git("--git-dir", str(self.remote), "rev-parse", "main"),
+                         rewritten)
 
     def test_prepare_explicit_base_validates_before_mutation(self):
         self.prepare()
@@ -2682,7 +2801,7 @@ class WorkflowTests(unittest.TestCase):
                 self.assertEqual(self.git_snapshot(), before)
 
     def test_prepare_explicit_base_divergence_preserves_local_history(self):
-        self.save_settings(sync={"mode": "none"})
+        self.save_settings(sync={"mode": "update"})
         self.git("push", "-q", "origin", "main")
         self.prepare()
         working_head = self.git("rev-parse", "HEAD")
@@ -2703,7 +2822,7 @@ class WorkflowTests(unittest.TestCase):
         self.assert_no_in_progress_git_operation()
 
     def test_prepare_explicit_base_fetch_and_update_failures_retain_backup(self):
-        self.save_settings(sync={"mode": "none"})
+        self.save_settings(sync={"mode": "update"})
         self.git("push", "-q", "origin", "main")
         self.prepare()
         original_head = self.git("rev-parse", "HEAD")

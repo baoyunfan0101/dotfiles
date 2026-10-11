@@ -16,7 +16,7 @@ COMMON = Path(__file__).resolve().parents[1]
 DEFAULT_SETTINGS = runpy.run_path(str(COMMON / "bin/agent-project"))["DEFAULT_SETTINGS"]
 GIT = shutil.which("git")
 BASH = shutil.which("bash")
-CORE_ACTIONS = ("prepare", "backup create", "backup list", "backup apply",
+CORE_ACTIONS = ("prepare", "backup create", "backup list",
                 "backup delete", "commit", "restore", "revert", "cherry-pick",
                 "rebase", "merge", "push", "remote connect", "remote reconnect",
                 "remote disconnect", "pr submit", "pr merge")
@@ -103,7 +103,7 @@ class PreflightTests(unittest.TestCase):
         result = self.prepare()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
-        self.assertEqual(result.stdout, "[git] prepare ok backup=none sync=updated "
+        self.assertEqual(result.stdout, "[git] prepare ok backup=none sync=skipped "
                          "branch=feat/test created=true\n")
 
     def assert_blocked(self, check, reason, required_by, fix, action="prepare"):

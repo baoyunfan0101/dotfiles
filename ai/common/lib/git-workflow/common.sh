@@ -103,7 +103,7 @@ Prepare options:
 
   --base BRANCH
       Configured base to use; defaults to the sole configured base. The base
-      is synchronized before branch creation.
+      follows git.sync.mode before branch creation.
 
   --continue
       Continue the checked-out working branch, including one with an open PR.
@@ -124,7 +124,7 @@ Bootstrap options:
       Retry a recorded root-commit rewrite without creating another commit.
 
   --all | -- PATH...
-      Select all non-ignored files except .ai/project.json, or listed paths.
+      Select all non-ignored files, or listed paths.
 
 Commit options:
   --message MESSAGE
