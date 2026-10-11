@@ -113,6 +113,8 @@ Project settings can be managed through `agent-project`; agents discover setting
 
 `set` creates a complete `.ai/project.json` when needed. Existing project files keep their explicit settings even if built-in defaults change later. `unset` writes the current default value for a selected setting.
 
+`agent-project` keeps new `.ai/project.json` files local by adding `/.ai/project.json` to Git's repository-local `info/exclude` file. It never changes the project's `.gitignore`. Untracked local settings do not appear in published commits, clones, or forks. If the configuration is already tracked, Git continues tracking it; `agent-project` warns so its removal from the index can be handled explicitly.
+
 Inspect or change project settings with:
 
 ```bash

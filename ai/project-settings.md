@@ -8,6 +8,8 @@ This reference describes repository workflow operations, including development, 
 
 The file is optional. Without it, the current built-in defaults apply and the workflow is disabled. Once created, the file contains every schema 1 setting. An incomplete file is invalid.
 
+`agent-project set` and `unset` add a root-level `/.ai/project.json` rule to Git's local `info/exclude` file before writing settings. They preserve other exclude rules and never edit or create `.gitignore`. New, untracked configuration stays local and is absent from commits, clones, and forks. If `.ai/project.json` is already tracked, the command warns: the exclude rule cannot remove existing tracking, which requires separate explicit cleanup.
+
 ## Manage project settings
 
 `agent-project` resolves `.ai/project.json` from the current Git repository root and fails outside a Git worktree.
