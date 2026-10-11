@@ -30,6 +30,9 @@ import sys
 
 bases = json.loads(sys.argv[1])
 requested = sys.argv[2]
+if not bases:
+    print("no configured base branches in git.branch.baseBranches")
+    sys.exit(1)
 if requested and requested not in bases:
     print("base is not configured in git.branch.baseBranches: " + requested)
     sys.exit(1)

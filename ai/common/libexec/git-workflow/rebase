@@ -48,7 +48,7 @@ if ! git rebase --quiet "$base_ref"; then
   restore_failed_sequence rebase "$branch" "$original_head"
 fi
 new_head="$(git rev-parse HEAD)"
-if [[ "$COMMIT_MODE" == automatic && "$new_head" != "$original_head" ]]; then
+if [[ "$COMMIT_MODE" == autoCommitAndPush && "$new_head" != "$original_head" ]]; then
   publish_rewrite "$branch" "$remote" "$previous_remote_sha" || fail "rebase completed locally but lease-safe push failed"
   pushed=true
 else

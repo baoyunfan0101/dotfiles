@@ -4,7 +4,7 @@ usage() {
   cat <<EOF2
 Usage:
   git-workflow prepare --continue
-  git-workflow prepare --base BRANCH --branch-name NAME
+  git-workflow prepare [--base BRANCH] --branch-name NAME
   git-workflow bootstrap [--base BRANCH] --message MESSAGE (--all | -- PATH...)
   git-workflow sync
   git-workflow backup create
@@ -47,8 +47,9 @@ Commands:
       See git-workflow backup --help.
 
   commit
-      Commit one atomic change after editing. Automatic mode also pushes it.
+      Commit one logical subtask after editing; policy controls skipping and pushing.
       --amend rewrites the current working-branch HEAD with lease-safe publishing.
+      Modes: manual skips; autoCommit stays local; autoCommitAndPush publishes.
 
   restore
       Restore selected tracked paths in the working tree from HEAD or a ref.
@@ -86,11 +87,11 @@ Read-only tasks do not use workflow commands.
 
 Prepare options:
   --branch-name NAME
-      New branch name using <type>/<description>; requires --base.
+      New branch name using <type>/<description>.
 
   --base BRANCH
-      Start a new working branch from this configured base. Requires
-      --branch-name and synchronizes the base before branch creation.
+      Configured base to use; defaults to the sole configured base. The base
+      is synchronized before branch creation.
 
   --continue
       Continue the checked-out working branch, including one with an open PR.
@@ -117,8 +118,7 @@ Commit options:
       Commit all current changes.
 
   --override-manual
-      Allow an explicitly requested commit when git.commit.mode is manual.
-      The commit is created but is not pushed automatically.
+      Perform a requested commit when the configured mode is manual. It stays local.
 
   -- PATH...
       Commit only the selected paths.
@@ -136,7 +136,7 @@ Rebase options:
 
 Push options:
   --override-manual
-      Allow an explicitly requested push when git.commit.mode is manual.
+      Perform a requested push when the configured mode is manual.
 
 Merge options:
   --base BRANCH

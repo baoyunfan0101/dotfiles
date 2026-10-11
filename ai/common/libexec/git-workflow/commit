@@ -99,7 +99,7 @@ commit_changes() {
         return 0
       fi
       ;;
-    automatic)
+    autoCommit|autoCommitAndPush)
       ;;
     *)
       fail "unsupported git.commit.mode: $COMMIT_MODE"
@@ -160,7 +160,7 @@ commit_changes() {
     fail "amend did not change HEAD"
   fi
 
-  if [[ "$COMMIT_MODE" == "manual" ]]; then
+  if [[ "$COMMIT_MODE" != "autoCommitAndPush" ]]; then
     printf '[git] commit ok sha=%s branch=%s pushed=false\n' "${commit_sha:0:7}" "$branch"
     return 0
   fi

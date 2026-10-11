@@ -22,12 +22,12 @@ Read-only Git commands may run directly. Do not directly run Git commands that m
 
 Use `git-workflow backup create` to preserve selected local changes before discarding them. Use `backup list` to inspect workflow backups, `backup apply <id>` only when the user explicitly wants to recover old changes, and `backup delete <id>` when the user explicitly wants to remove a backup. `prepare` backs up and discards selected changes; it never automatically applies a backup.
 
-Repository bootstrap is the explicit one-time `git-workflow bootstrap --message "<message>" -- <paths>...` operation. It creates and publishes the configured base branch's initial commit, including in manual commit mode. Development: prepare -> edit -> commit*. Delivery requires explicit user authorization. Use `git-workflow --help` for syntax and options. Supported mutations: `bootstrap`, `prepare`, `sync`, `backup create/apply/delete`, `commit`, `commit --amend`, `restore`, `revert`, `cherry-pick`, `rebase`, `push`, `branch create/switch/rename/delete`, `remote connect/reconnect/disconnect`, `merge`, `pr submit`, and `pr merge`.
+For an empty repository, run `git-workflow bootstrap --message "<message>" --all` before development. Development: prepare -> edit -> commit*. Delivery requires explicit user authorization. Use `git-workflow --help` for command syntax. Supported mutations: `bootstrap`, `prepare`, `sync`, `backup`, `commit`, `commit --amend`, `restore`, `revert`, `cherry-pick`, `rebase`, `push`, `branch`, `remote`, `merge`, and `pr`.
 
-For each new independent task, start a new branch from the configured base before editing:
+For each new independent task, start a new branch before editing:
 
 ```bash
-git-workflow prepare --base <base> --branch-name <name>
+git-workflow prepare --branch-name <name>
 ```
 
 To explicitly continue work already assigned to the checked-out working branch, run `git-workflow prepare --continue`. The checked-out branch alone does not establish continuation intent. This also applies when it has no PR or its PR is open, closed, or merged. An open PR can be updated with further commits and pushes after explicit continuation.
@@ -36,11 +36,9 @@ To update an existing local base branch after remote changes, switch to it with 
 
 If `prepare` reports `workflow-disabled`, do not use further workflow commands for that work.
 
-A working branch may contain multiple Task Specs and atomic commits when continuation is explicitly requested. A Task Spec does not authorize PR submission, merge, or integration.
+A working branch may contain multiple Task Specs and logical-subtask commits when continuation is explicitly requested. A Task Spec does not authorize PR submission, merge, or integration.
 
-Delivery uses `--base`, an existing PR's base, or the sole configured base. Supply `--base` when ambiguous; it must be configured.
-
-Commit each atomic change by path, as often as needed:
+After each logical subtask, invoke `git-workflow commit` with its paths and a concise message:
 
 ```bash
 git-workflow commit --message "<message>" -- <paths>...
@@ -51,7 +49,7 @@ git-workflow commit --message "<message>" -- <paths>...
 - Run `git-workflow merge` only when the user explicitly authorizes local integration.
 - Task Spec or commit completion does not authorize PR submission or integration. Never infer merge authorization from PR submission, CI success, or task completion.
 
-Use `--all` only for one atomic change. Use `--override-manual` only for an explicit user request blocked by manual mode.
+One logical subtask may touch multiple paths. Use `--all` only when all changes belong to that subtask. Add `--override-manual` only when the user explicitly requests the commit or push.
 
 Follow repository naming conventions, or default to:
 

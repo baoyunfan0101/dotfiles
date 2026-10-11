@@ -80,7 +80,7 @@ Single-setting `set` and `unset` remain supported. An agent can translate a natu
       "method": "stash"
     },
     "commit": {
-      "mode": "automatic"
+      "mode": "autoCommitAndPush"
     },
     "branch": {
       "baseBranches": ["main"],
@@ -268,22 +268,23 @@ This setting has no effect when:
 
 ### `git.commit.mode`
 
-Controls whether the agent workflow automatically commits and pushes completed changes.
+Controls how Shell handles ordinary workflow commits, including amendments, and whether it pushes them.
 
 Default:
 
 ```json
-"automatic"
+"autoCommitAndPush"
 ```
 
 Supported values:
 
 | Value | Meaning |
 |---|---|
-| `"manual"` | Normal workflow-driven commit and push operations are skipped. Explicitly requested commits or pushes can still be performed with the workflow's manual override. |
-| `"automatic"` | Workflow commits are created normally, and each successful workflow commit is automatically pushed. |
+| `"manual"` | Ordinary `commit` commands skip without changing the index or working tree. `push` also skips unless manually overridden. |
+| `"autoCommit"` | `commit` creates a local commit without pushing. Explicit `push` remains available. |
+| `"autoCommitAndPush"` | `commit` creates a local commit and pushes it after success. |
 
-In `"manual"` mode, an explicitly requested commit can be performed with:
+In `"manual"` mode, an explicitly requested commit can be performed locally with:
 
 ```bash
 git-workflow commit \
@@ -298,11 +299,11 @@ An explicitly requested push can be performed with:
 git-workflow push --override-manual
 ```
 
-A manually overridden commit is not automatically pushed.
+A manually overridden commit is not automatically pushed. `bootstrap`, local integration, and PR submission keep their own publication behavior.
 
 ## Git branches
 
-Start an independent task with `git-workflow prepare --base <base> --branch-name <name>`. This synchronizes the configured base and creates the new branch from its resulting HEAD. Use `git-workflow prepare --continue` only when intentionally continuing the checked-out working branch. The checked-out branch alone never establishes continuation intent. PR state does not control branch reuse. A working branch may contain multiple Task Specs and atomic commits when continuation is explicitly requested. A Task Spec does not authorize delivery. Delivery resolves its base when requested.
+Start an independent task with `git-workflow prepare --branch-name <name>`. The command uses the sole configured base, or accepts `--base <base>` when several are configured, synchronizes it, and creates the new branch from its resulting HEAD. Use `git-workflow prepare --continue` only when intentionally continuing the checked-out working branch. The checked-out branch alone never establishes continuation intent. PR state does not control branch reuse. A working branch may contain multiple logical-subtask commits when continuation is explicitly requested. A Task Spec does not authorize delivery. Delivery resolves its base when requested.
 
 Use `git-workflow sync` to update an existing, checked-out base branch from its configured remote tracking branch, such as after a PR has been merged remotely. The working tree must be clean. Sync fetches the remote state, fast-forwards the local base when possible, and succeeds without changing history when already current. It rejects ahead or diverged local history; it never merges or rebases. For a post-merge update, run `git-workflow branch switch main` and then `git-workflow sync`.
 

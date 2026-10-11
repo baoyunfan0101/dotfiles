@@ -13,7 +13,7 @@
       "method": "stash"
     },
     "commit": {
-      "mode": "automatic"
+      "mode": "autoCommitAndPush"
     },
     "branch": {
       "baseBranches": [

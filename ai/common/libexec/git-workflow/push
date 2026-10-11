@@ -46,7 +46,7 @@ push_changes() {
         return 0
       fi
       ;;
-    automatic)
+    autoCommit|autoCommitAndPush)
       ;;
     *)
       fail "unsupported git.commit.mode: $COMMIT_MODE"
