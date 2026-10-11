@@ -1,3 +1,5 @@
+source "$WORKFLOW_ROOT/lib/git-workflow/pr-metadata.sh"
+
 require_clean_worktree() {
   if has_local_changes; then
     fail "working tree must be clean before $CURRENT_ACTION"
@@ -146,6 +148,24 @@ publish_rewrite() {
     push_branch "$branch" || return 1
   fi
   clear_rewrite "$branch" "$remote"
+  sync_pr_after_push "$branch" "$remote" "$previous_remote_sha"
+}
+
+push_working_branch() {
+  local branch="$1"
+  local remote
+  local previous_remote_sha
+
+  BASE_BRANCHES_JSON="$(setting git.branch.baseBranches)" || return 1
+  if is_base_branch "$branch"; then
+    PR_SYNC_STATUS=none
+    push_branch "$branch"
+    return
+  fi
+  remote="$(remote_for_branch "$branch")" || return 1
+  previous_remote_sha="$(remote_branch_sha "$remote" "$branch")" || return 1
+  push_branch "$branch" || return 1
+  sync_pr_after_push "$branch" "$remote" "$previous_remote_sha"
 }
 
 restore_failed_sequence() {

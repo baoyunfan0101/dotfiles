@@ -30,9 +30,10 @@ if ! git revert --no-edit "$target_sha"; then
 fi
 new_head="$(git rev-parse HEAD)"
 if [[ "$COMMIT_MODE" == autoCommitAndPush ]]; then
-  push_branch "$branch" || fail "revert commit created but push failed"
+  push_working_branch "$branch" || fail "revert commit created but push failed"
   pushed=true
 else
   pushed=false
 fi
-printf '[git] revert ok sha=%s branch=%s pushed=%s\n' "${new_head:0:7}" "$branch" "$pushed"
+printf '[git] revert ok sha=%s branch=%s pushed=%s pr=%s\n' \
+  "${new_head:0:7}" "$branch" "$pushed" "$PR_SYNC_STATUS"

@@ -70,10 +70,10 @@ push_changes() {
     publish_rewrite "$branch" "$remote" "$REWRITE_EXPECTED" ||
       fail "lease-safe rewrite push failed; local commits were preserved"
   else
-    push_branch "$branch"
+    push_working_branch "$branch"
   fi
 
-  printf '[git] push ok branch=%s\n' "$branch"
+  printf '[git] push ok branch=%s pr=%s\n' "$branch" "$PR_SYNC_STATUS"
 }
 
 push_changes "$@"

@@ -24,6 +24,12 @@ def value(flag):
     return args[args.index(flag) + 1]
 
 
+def body_value():
+    if "--body-file" in args:
+        return Path(value("--body-file")).read_text()
+    return value("--body")
+
+
 def git(*arguments, cwd=None):
     return subprocess.check_output(["git", *arguments], cwd=cwd, text=True,
                                    stderr=subprocess.PIPE).strip()
@@ -32,21 +38,26 @@ def git(*arguments, cwd=None):
 if args[:2] == ["pr", "list"]:
     prs = json.loads(os.environ.get("GH_EXTRA_PRS", "[]"))
     if state.get("state") == "OPEN" and state["head"] == value("--head"):
-        prs.append({"url": state["url"], "baseRefName": state["base"]})
+        prs.append({"url": state["url"], "baseRefName": state["base"],
+                    "body": state.get("body", ""),
+                    "headRepository": {"nameWithOwner": os.environ["GH_REPO_ID"]}})
     print(json.dumps(prs))
 elif args[:2] == ["pr", "create"]:
     state = {"state": "OPEN", "head": value("--head"), "base": value("--base"),
-             "title": value("--title"), "body": value("--body"),
-             "url": "https://example.invalid/pr/1"}
+             "title": value("--title"), "body": body_value(),
+             "url": "https://github.com/owner/dotfiles/pull/1"}
     print(state["url"])
 elif args[:2] == ["pr", "edit"]:
-    state.update(title=value("--title"), body=value("--body"))
+    if "--title" in args:
+        state["title"] = value("--title")
+    if "--body" in args or "--body-file" in args:
+        state["body"] = body_value()
 elif args[:2] == ["pr", "merge"]:
     assert "--auto" not in args
     assert state["state"] == "OPEN"
     assert git("rev-parse", "HEAD") == value("--match-head-commit")
     if not os.environ.get("GH_PENDING"):
-        remote = git("remote", "get-url", "origin")
+        remote = os.environ["GH_REMOTE_PATH"]
         with tempfile.TemporaryDirectory(dir=state_path.parent) as directory:
             git("clone", "-q", "--branch", state["base"], remote, directory)
             if "--squash" in args:
@@ -58,7 +69,10 @@ elif args[:2] == ["pr", "merge"]:
             git("push", "-q", "origin", state["base"], cwd=directory)
         state["state"] = "MERGED"
 elif args[:2] == ["pr", "view"]:
-    print(state.get("state", ""))
+    if "--json" in args and value("--json") == "body":
+        print(json.dumps({"body": state.get("body", "")}))
+    else:
+        print(state.get("state", ""))
 else:
     sys.exit(2)
 state_path.write_text(json.dumps(state))

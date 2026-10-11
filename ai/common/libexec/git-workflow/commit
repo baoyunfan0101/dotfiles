@@ -173,13 +173,14 @@ commit_changes() {
       fail "amend ${commit_sha:0:7} created but lease-safe push failed"
     fi
     pushed=true
-  elif ! push_branch "$branch"; then
+  elif ! push_working_branch "$branch"; then
     fail "commit ${commit_sha:0:7} created but push failed"
   else
     pushed=true
   fi
 
-  printf '[git] commit ok sha=%s branch=%s pushed=%s\n' "${commit_sha:0:7}" "$branch" "$pushed"
+  printf '[git] commit ok sha=%s branch=%s pushed=%s pr=%s\n' \
+    "${commit_sha:0:7}" "$branch" "$pushed" "$PR_SYNC_STATUS"
 }
 
 commit_changes "$@"
