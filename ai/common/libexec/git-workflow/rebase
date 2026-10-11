@@ -39,7 +39,7 @@ base="$(resolve_configured_base "$requested_base")"
 remote="$(remote_for_branch "$branch" "$base")"
 original_head="$(git rev-parse HEAD)"
 previous_remote_sha="$(remote_branch_sha "$remote" "$branch")"
-verify_remote_ancestor "$previous_remote_sha" "$original_head"
+verify_rewrite_source "$branch" "$remote" "$previous_remote_sha" "$original_head"
 git fetch --quiet "$remote" "refs/heads/$base:refs/remotes/$remote/$base" || fail "cannot fetch base: $base"
 base_ref="refs/remotes/$remote/$base"
 git rev-parse --verify "$base_ref^{commit}" >/dev/null || fail "base is not resolvable: $base"
@@ -48,6 +48,9 @@ if ! git rebase --quiet "$base_ref"; then
   restore_failed_sequence rebase "$branch" "$original_head"
 fi
 new_head="$(git rev-parse HEAD)"
+if [[ "$new_head" != "$original_head" ]]; then
+  record_rewrite "$branch" "$remote" "$previous_remote_sha" "$new_head"
+fi
 if [[ "$COMMIT_MODE" == autoCommitAndPush && "$new_head" != "$original_head" ]]; then
   publish_rewrite "$branch" "$remote" "$previous_remote_sha" || fail "rebase completed locally but lease-safe push failed"
   pushed=true

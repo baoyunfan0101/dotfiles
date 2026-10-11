@@ -77,7 +77,7 @@ Delivery                 -> explicit user authorization
 | `git-workflow pr submit` | Create or update a PR when explicitly requested. |
 | `git-workflow pr merge` | Merge an existing PR when explicitly authorized. |
 | `git-workflow merge` | Integrate locally when explicitly authorized. |
-| `git-workflow push` | Auxiliary explicit push. |
+| `git-workflow push` | Explicit push; use `--rewrite` after a local published amend or rebase. |
 | `git-workflow remote connect <url>` | Connect the local repository to a remote repository. |
 | `git-workflow remote reconnect <url>` | Change the existing remote repository connection. |
 | `git-workflow remote disconnect` | Remove the existing remote repository connection. |

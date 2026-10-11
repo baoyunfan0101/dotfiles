@@ -17,7 +17,7 @@ Usage:
   git-workflow revert COMMIT
   git-workflow cherry-pick COMMIT
   git-workflow rebase [--base BRANCH]
-  git-workflow push [--override-manual]
+  git-workflow push [--override-manual] [--rewrite]
   git-workflow remote connect <url>
   git-workflow remote reconnect <url>
   git-workflow remote disconnect
@@ -48,7 +48,8 @@ Commands:
 
   commit
       Commit one logical subtask after editing; policy controls skipping and pushing.
-      --amend rewrites the current working-branch HEAD with lease-safe publishing.
+      --amend rewrites the current working-branch HEAD. Published history can
+      later be sent with push --rewrite when automatic pushing is disabled.
       Modes: manual skips; autoCommit stays local; autoCommitAndPush publishes.
 
   restore
@@ -65,7 +66,8 @@ Commands:
 
   push
       Auxiliary operation for an explicitly needed push outside commit: push
-      the current branch according to project settings.
+      the current branch according to project settings. --rewrite publishes a
+      recorded local amend or rebase with a remote lease.
 
   branch
       Create, switch, rename, or safely delete branches. See git-workflow
@@ -135,6 +137,9 @@ Rebase options:
       Use a configured base; required when multiple bases are configured.
 
 Push options:
+  --rewrite
+      Publish a recorded local amend or rebase with an exact remote lease.
+
   --override-manual
       Perform a requested push when the configured mode is manual.
 
