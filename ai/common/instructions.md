@@ -25,6 +25,7 @@ Discover command syntax with `git-workflow --help` and command-specific `--help`
 - For an empty repository, run `git-workflow bootstrap` before development.
 - For each independent task, run `git-workflow prepare --branch-name <name>` before editing.
 - To explicitly continue work assigned to the checked-out working branch, run `git-workflow prepare --continue`. Neither the checked-out branch nor PR state establishes continuation intent. Explicit continuation may span multiple Task Specs and logical-subtask commits.
+- `prepare` discards uncommitted changes after backing them up, so run it before the first edit. If uncommitted changes on the working branch belong to the current task, commit them before `prepare --continue`; if their owner is unclear, stop and ask.
 - Follow `prepare -> edit -> commit*`. After each logical subtask, invoke `git-workflow commit --message "<message>" -- <paths>...` with a concise message. Use `--all` only when every change belongs to that subtask.
 - Shell enforces configured Commit and Push policies. Add `--override-manual` only for an explicitly requested commit or push.
 - For local base updates, use `git-workflow branch switch <base>`, then `git-workflow sync`.

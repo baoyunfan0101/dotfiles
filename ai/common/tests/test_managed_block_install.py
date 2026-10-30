@@ -7,26 +7,30 @@ from sandbox import isolated_environment
 
 
 ROOT = Path(__file__).resolve().parents[3]
-SOURCE = ROOT / "ai/codex/AGENTS.md"
 INSTALLER = ROOT / "ai/install.sh"
 BEGIN = "<!-- BEGIN baoyunfan0101/dotfiles managed block -->"
 END = "<!-- END baoyunfan0101/dotfiles managed block -->"
 
 
 class ManagedBlockInstallTests(unittest.TestCase):
+    AGENT = "codex"
+    SOURCE = ROOT / "ai/codex/AGENTS.md"
+    HOME_VARIABLE = "CODEX_HOME"
+    TARGET_NAME = "AGENTS.md"
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.env = isolated_environment(self.root)
-        self.target = Path(self.env["CODEX_HOME"]) / "AGENTS.md"
+        self.target = Path(self.env[self.HOME_VARIABLE]) / self.TARGET_NAME
 
     def install(self, *options):
-        return subprocess.run([str(INSTALLER), "--agents", "codex", *options],
+        return subprocess.run([str(INSTALLER), "--agents", self.AGENT, *options],
                               env=self.env, capture_output=True, text=True)
 
     def block(self):
-        return f"{BEGIN}\n\n{SOURCE.read_text()}\n{END}\n"
+        return f"{BEGIN}\n\n{self.SOURCE.read_text()}\n{END}\n"
 
     def assert_one_block(self, content):
         self.assertEqual(content.count(BEGIN), 1)
@@ -78,7 +82,7 @@ class ManagedBlockInstallTests(unittest.TestCase):
                     before = self.target.read_bytes()
                     result = self.install(*options)
                     self.assertNotEqual(result.returncode, 0)
-                    self.assertIn("AGENTS.md contains malformed dotfiles managed block markers",
+                    self.assertIn(f"{self.TARGET_NAME} contains malformed dotfiles managed block markers",
                                   result.stderr)
                     self.assertEqual(self.target.read_bytes(), before)
 
@@ -91,3 +95,10 @@ class ManagedBlockInstallTests(unittest.TestCase):
         self.assertTrue(self.target.exists())
         self.assertTrue(self.target.read_text().startswith("personal rules\n"))
         self.assertNotIn(BEGIN, self.target.read_text())
+
+
+class ClaudeManagedBlockInstallTests(ManagedBlockInstallTests):
+    AGENT = "claude"
+    SOURCE = ROOT / "ai/claude/CLAUDE.md"
+    HOME_VARIABLE = "CLAUDE_CONFIG_DIR"
+    TARGET_NAME = "CLAUDE.md"

@@ -66,7 +66,10 @@ class CleanupTests(unittest.TestCase):
             INSERT INTO project_roots VALUES('p1','/repo/a'),('p2','/repo/b'),('p3','/repo/empty');
             INSERT INTO project_idempotency_keys VALUES('k1','p1');
         ''')
-        self.sql(self.history, 'CREATE TABLE thread_items(thread_id TEXT);')
+        self.sql(self.history, '''
+            CREATE TABLE thread_items(thread_id TEXT);
+            CREATE TABLE inbox_items(thread_id TEXT);
+        ''')
         self.global_path = self.home / '.codex-global-state.json'
         self.global_path.write_text(json.dumps({
             'local-projects': {'old1': {'id': 'old1', 'name': 'WagWag', 'rootPaths': ['/repo/a']}},
@@ -108,6 +111,7 @@ class CleanupTests(unittest.TestCase):
             db.execute('INSERT INTO thread_attachments VALUES(?,?)', ('attachment-not-a-thread', tid))
         with connection(self.history) as db:
             db.execute('INSERT INTO thread_items VALUES(?)', (tid,))
+            db.execute('INSERT INTO inbox_items VALUES(?)', (tid,))
         return path
 
     def run_cli(self, *args):
@@ -134,6 +138,7 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(out['rollouts_deleted'], 1)
         self.assertEqual(self.remaining(), [(B,), (C,)])
         self.assertEqual(self.query(self.history, 'SELECT thread_id FROM thread_items'), [(B,), (C,)])
+        self.assertEqual(self.query(self.history, 'SELECT thread_id FROM inbox_items'), [(B,), (C,)])
         self.assertEqual(self.query(self.desktop, 'SELECT catalog_revision FROM local_thread_catalog_metadata'), [(11,)])
         self.assertEqual(self.query(self.desktop, 'SELECT initial_build_complete FROM local_thread_catalog_sync_state'), [(1,), (1,)])
         before = self.snapshot()

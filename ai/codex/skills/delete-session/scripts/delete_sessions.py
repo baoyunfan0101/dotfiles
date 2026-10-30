@@ -25,7 +25,7 @@ TABLES = {
     },
     'history': {name: ('thread_id',) for name in (
         'thread_turns', 'thread_items', 'thread_history_projection_state',
-        'thread_realtime_items')},
+        'thread_realtime_items', 'inbox_items')},
 }
 DB_PATHS = {'desktop': 'sqlite/codex-dev.db', 'state': 'state_5.sqlite',
             'history': 'thread_history_1.sqlite'}

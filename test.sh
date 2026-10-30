@@ -51,6 +51,7 @@ env -i \
   PATH="$test_sandbox/bin:$PATH" \
   HOME="$test_sandbox/home" \
   CODEX_HOME="$test_sandbox/home/.codex" \
+  CLAUDE_CONFIG_DIR="$test_sandbox/home/.claude" \
   XDG_CONFIG_HOME="$test_sandbox/home/.config" \
   XDG_STATE_HOME="$test_sandbox/home/.local/state" \
   XDG_DATA_HOME="$test_sandbox/home/.local/share" \
