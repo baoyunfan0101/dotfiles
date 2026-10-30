@@ -14,9 +14,10 @@ class SandboxTests(unittest.TestCase):
             root = Path(directory)
             with patch.dict(os.environ, {"GIT_DIR": "/outside/repo", "GH_TOKEN": "canary",
                                          "HOME": "/outside/home", "CODEX_HOME": "/outside/codex",
+                                         "CLAUDE_CONFIG_DIR": "/outside/claude",
                                          "BASH_ENV": "/outside/shell"}):
                 environment = isolated_environment(root)
-            for key in ("HOME", "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
+            for key in ("HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
                         "XDG_DATA_HOME", "XDG_CACHE_HOME", "GH_CONFIG_DIR", "TMPDIR"):
                 self.assertIn(root, Path(environment[key]).parents)
             for key in ("GIT_DIR", "GH_TOKEN", "BASH_ENV"):
@@ -27,7 +28,7 @@ class SandboxTests(unittest.TestCase):
     def test_entrypoint_isolation(self):
         root = Path(os.environ["DOTFILES_TEST_SANDBOX"])
         self.assertEqual(Path.cwd(), root.resolve())
-        for key in ("HOME", "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
+        for key in ("HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
                     "XDG_DATA_HOME", "XDG_CACHE_HOME", "GH_CONFIG_DIR", "TMPDIR"):
             self.assertIn(root, Path(os.environ[key]).parents)
         self.assertEqual(os.environ["GIT_CONFIG_NOSYSTEM"], "1")

@@ -8,6 +8,7 @@ def isolated_environment(root):
         "PATH": os.environ["PATH"],
         "HOME": str(home),
         "CODEX_HOME": str(home / ".codex"),
+        "CLAUDE_CONFIG_DIR": str(home / ".claude"),
         "XDG_CONFIG_HOME": str(home / ".config"),
         "XDG_STATE_HOME": str(home / ".local/state"),
         "XDG_DATA_HOME": str(home / ".local/share"),
@@ -26,7 +27,7 @@ def isolated_environment(root):
         "PYTHONUTF8": "1",
         "PYTHONDONTWRITEBYTECODE": "1",
     }
-    for key in ("HOME", "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
+    for key in ("HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
                 "XDG_DATA_HOME", "XDG_CACHE_HOME", "GH_CONFIG_DIR", "TMPDIR"):
         Path(environment[key]).mkdir(parents=True, exist_ok=True)
     return environment

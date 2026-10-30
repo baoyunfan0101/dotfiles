@@ -24,6 +24,7 @@ dotfiles/
       lib/agent_project/         Configuration schema, persistence, and exclusion
       tests/                    Regression tests
     codex/                      Codex configuration and skills
+    claude/                     Claude Code configuration
 ```
 
 ## Quick Start
@@ -53,7 +54,7 @@ Use CLI help for command details and [Project Settings](ai/project-settings.md) 
 
 Installing dotfiles makes the workflow available globally, but each repository decides whether to use it. The built-in default is `workflow.enabled = false`.
 
-The Codex global adapter checks the project's opt-in flag before loading shared workflow instructions. Projects without an enabled workflow do not load that guidance or run workflow commands for activation discovery.
+The Codex and Claude Code global adapters check the project's opt-in flag before loading shared workflow instructions. Projects without an enabled workflow do not load that guidance or run workflow commands for activation discovery.
 
 For an enabled repository:
 
@@ -123,7 +124,7 @@ agent-project set git.integration.mode pullRequest
 agent-project unset git.integration.mode
 ```
 
-Project-specific Agent rules belong in the repository-root `AGENTS.md`. They are independent of `.ai/project.json`: a project can have Agent rules without using this Git workflow, or use the workflow without additional Agent rules.
+Project-specific Agent rules belong in the repository-root `AGENTS.md`. Claude Code reads it through the global adapter when the repository has no `CLAUDE.md`. They are independent of `.ai/project.json`: a project can have Agent rules without using this Git workflow, or use the workflow without additional Agent rules.
 
 See [Project Settings](ai/project-settings.md) for the complete configuration reference.
 
@@ -143,7 +144,7 @@ Tests use temporary homes, repositories, local bare remotes, isolated configurat
 
 Use the Quick Start command for normal installation and updates. It keeps a checkout at `~/.local/share/dotfiles` and runs the installer from there.
 
-Dotfiles does not own the entire `~/.codex/AGENTS.md` file. It manages only the content inside its marked block; personal rules outside the block are preserved:
+Dotfiles does not own the entire `~/.codex/AGENTS.md` or `~/.claude/CLAUDE.md` file. It manages only the content inside its marked block; personal rules outside the block are preserved:
 
 ```md
 # Personal rules

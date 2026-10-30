@@ -15,16 +15,20 @@ class InstructionTests(unittest.TestCase):
         self.instructions = INSTRUCTIONS.read_text()
 
     def test_adapter_loads_shared_instructions_only_after_opt_in(self):
-        adapter = (ROOT / "ai/codex/AGENTS.md").read_text()
-        self.assertLess(len(adapter), 800)
-        for pattern in (
-            r"At the start.*Git repository.*agent-workflow-opt-in.*once",
-            r"Exit 0:.*read.*agent-workflow/instructions\.md.*follow",
-            r"Exit 1:.*stop loading.*do not call.*agent-project.*git-workflow",
-            r"Any other exit:.*report.*do not perform automatic Git workflow",
-            r"explicit request.*project settings.*agent-project.*workflow is disabled",
-        ):
-            self.assertRegex(adapter, pattern)
+        for path in ("ai/codex/AGENTS.md", "ai/claude/CLAUDE.md"):
+            adapter = (ROOT / path).read_text()
+            with self.subTest(adapter=path):
+                self.assertLess(len(adapter), 800)
+                for pattern in (
+                    r"At the start.*Git repository.*agent-workflow-opt-in.*once",
+                    r"Exit 0:.*read.*agent-workflow/instructions\.md.*follow",
+                    r"Exit 1:.*stop loading.*do not call.*agent-project.*git-workflow",
+                    r"Any other exit:.*report.*do not perform automatic Git workflow",
+                    r"explicit request.*project settings.*agent-project.*workflow is disabled",
+                ):
+                    self.assertRegex(adapter, pattern)
+        claude = (ROOT / "ai/claude/CLAUDE.md").read_text()
+        self.assertRegex(claude, r"repository root has `AGENTS\.md` but no `CLAUDE\.md`.*read `AGENTS\.md`")
         probe = (ROOT / "ai/common/libexec/agent-workflow-opt-in").read_text()
         for dependency in ("instructions.md", "agent-project", "git-workflow"):
             self.assertNotIn(dependency, probe)

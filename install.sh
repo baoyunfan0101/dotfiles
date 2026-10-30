@@ -30,7 +30,7 @@ else
     fail "cannot fast-forward main; inspect local commits in $checkout"
 fi
 
-bash "$checkout/ai/install.sh" --agents codex --symlink --force --clean || \
+bash "$checkout/ai/install.sh" --agents codex,claude --symlink --force --clean || \
   fail "internal installer failed; inspect the error above and retry"
 
 cat <<'EOF'
