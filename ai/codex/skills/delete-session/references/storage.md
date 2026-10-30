@@ -7,9 +7,13 @@ an isolated temporary home. No command deletes a working directory.
 Supported adapters live in delete_sessions.py:
 
 - sqlite/codex-dev.db: local catalog, scan entries, timeline, revision, sync state
-  and scan checkpoints. Host filtering preserves remote and ChatGPT catalog rows.
+  and scan checkpoints, plus inbox_items references to resolved local threads.
+  Automation run records and host-filtered visualization suggestions are supported.
+  These auxiliary rows do not discover deletion targets; unassigned and remote-only
+  notifications are preserved. Host filtering preserves remote and ChatGPT catalog rows.
 - state_5.sqlite: app-server threads, dynamic tools, attachments, spawn edges,
-  projects, project_roots and project_idempotency_keys.
+  guardian_review_feedback, thread_read_receipts, projects, project_roots and
+  project_idempotency_keys. Automation definitions are preserved.
 - thread_history_1.sqlite: turns, items, realtime items and projection state.
 - sessions and archived_sessions: exact rollout IDs and session_meta payloads.
 - .codex-global-state.json: local-projects and its known project display and
@@ -21,6 +25,10 @@ exact cwd/name resolution uses known thread working directories; project deletio
 is unsupported. Explicit project assignments take precedence over cwd fallback.
 Unknown versions, incompatible known tables, or unknown thread-ID tables abort
 before mutation. Unrelated databases and global-state keys remain untouched.
+Rollout identity uses session_meta rather than a resumed file's filename UUID.
+Missing rollout files remain cleanable. Thread INSERT and timestamp-column UPDATE
+triggers cannot fire during cleanup; the exact known realtime projection DELETE
+trigger is supported. Other mutation triggers still abort preflight.
 
 Dry runs use read-only SQLite connections and never create directories or files.
 Execution preflights resolution, schema, rollout containment and JSON shapes.

@@ -43,6 +43,8 @@ class CleanupTests(unittest.TestCase):
                 display_title TEXT, cwd TEXT, project_id TEXT);
             CREATE TABLE local_thread_catalog_scan_entries(thread_id TEXT, host_id TEXT);
             CREATE TABLE thread_timeline_ledger(thread_id TEXT, host_id TEXT);
+            CREATE TABLE inbox_items(id TEXT PRIMARY KEY, title TEXT,
+                description TEXT, thread_id TEXT, read_at INTEGER, created_at INTEGER);
             CREATE TABLE local_thread_catalog_metadata(id INTEGER, catalog_revision INTEGER);
             INSERT INTO local_thread_catalog_metadata VALUES(1, 10);
             CREATE TABLE local_thread_catalog_sync_state(host_id TEXT,
@@ -68,7 +70,6 @@ class CleanupTests(unittest.TestCase):
         ''')
         self.sql(self.history, '''
             CREATE TABLE thread_items(thread_id TEXT);
-            CREATE TABLE inbox_items(thread_id TEXT);
         ''')
         self.global_path = self.home / '.codex-global-state.json'
         self.global_path.write_text(json.dumps({
@@ -105,13 +106,13 @@ class CleanupTests(unittest.TestCase):
             db.execute('INSERT INTO local_thread_catalog VALUES(?,?,?,?,?)', (tid, 'local', title, cwd, project))
             for table in ('local_thread_catalog_scan_entries', 'thread_timeline_ledger'):
                 db.execute('INSERT INTO ' + table + ' VALUES(?,?)', (tid, 'local'))
+            db.execute('INSERT INTO inbox_items(id, thread_id) VALUES(?,?)', (tid, tid))
         with connection(self.state) as db:
             db.execute('INSERT INTO threads VALUES(?,?,?,?,?)', (tid, str(path), cwd, title, project))
             db.execute('INSERT INTO thread_dynamic_tools VALUES(?)', (tid,))
             db.execute('INSERT INTO thread_attachments VALUES(?,?)', ('attachment-not-a-thread', tid))
         with connection(self.history) as db:
             db.execute('INSERT INTO thread_items VALUES(?)', (tid,))
-            db.execute('INSERT INTO inbox_items VALUES(?)', (tid,))
         return path
 
     def run_cli(self, *args):
@@ -138,7 +139,7 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(out['rollouts_deleted'], 1)
         self.assertEqual(self.remaining(), [(B,), (C,)])
         self.assertEqual(self.query(self.history, 'SELECT thread_id FROM thread_items'), [(B,), (C,)])
-        self.assertEqual(self.query(self.history, 'SELECT thread_id FROM inbox_items'), [(B,), (C,)])
+        self.assertEqual(self.query(self.desktop, 'SELECT thread_id FROM inbox_items'), [(B,), (C,)])
         self.assertEqual(self.query(self.desktop, 'SELECT catalog_revision FROM local_thread_catalog_metadata'), [(11,)])
         self.assertEqual(self.query(self.desktop, 'SELECT initial_build_complete FROM local_thread_catalog_sync_state'), [(1,), (1,)])
         before = self.snapshot()
@@ -148,6 +149,61 @@ class CleanupTests(unittest.TestCase):
     def test_exact_title_deletion(self):
         self.assertEqual(self.run_cli('thread', 'First')[0], 0)
         self.assertEqual(self.remaining(), [(B,), (C,)])
+
+    def test_auxiliary_records_preserve_remote_and_unassigned(self):
+        self.sql(self.desktop, '''
+            CREATE TABLE automation_runs(thread_id TEXT PRIMARY KEY, automation_id TEXT);
+            CREATE TABLE live_visualization_suggestions(thread_id TEXT, host_id TEXT);
+            INSERT INTO inbox_items(id) VALUES('unassigned');
+        ''')
+        self.sql(self.state, '''
+            CREATE TABLE guardian_review_feedback(id TEXT, thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE);
+            CREATE TABLE thread_read_receipts(thread_id TEXT PRIMARY KEY);
+        ''')
+        for table in ('inbox_items', 'automation_runs'):
+            with connection(self.desktop) as db:
+                if table == 'inbox_items':
+                    db.execute('INSERT INTO inbox_items(id,thread_id) VALUES(?,?)', ('remote', 'remote-only'))
+                else:
+                    db.executemany('INSERT INTO automation_runs VALUES(?,?)', [(A, 'keep-definition'), ('remote-only', 'remote')])
+        with connection(self.desktop) as db:
+            db.executemany('INSERT INTO live_visualization_suggestions VALUES(?,?)', [(A, 'local'), (A, 'ssh:remote')])
+        with connection(self.state) as db:
+            db.execute('INSERT INTO guardian_review_feedback VALUES(?,?)', ('feedback', A))
+            db.execute('INSERT INTO thread_read_receipts VALUES(?)', (A,))
+        code, out = self.run_cli('all')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.query(self.desktop, 'SELECT thread_id FROM inbox_items'), [(None,), ('remote-only',)])
+        self.assertEqual(self.query(self.desktop, 'SELECT thread_id FROM automation_runs'), [('remote-only',)])
+        self.assertEqual(self.query(self.desktop, 'SELECT host_id FROM live_visualization_suggestions'), [('ssh:remote',)])
+        self.assertEqual(self.query(self.state, 'SELECT * FROM guardian_review_feedback'), [])
+        self.assertEqual(self.query(self.state, 'SELECT * FROM thread_read_receipts'), [])
+
+    def test_resumed_rollout_metadata_identity(self):
+        path = next(self.home.rglob('*' + A + '.jsonl'))
+        resumed = path.with_name('resumed-' + B + '.jsonl')
+        path.rename(resumed)
+        with connection(self.state) as db:
+            db.execute('UPDATE threads SET rollout_path=? WHERE id=?', (str(resumed), A))
+        code, out = self.run_cli('thread', A)
+        self.assertEqual(code, 0, out)
+        self.assertFalse(resumed.exists())
+        self.assertEqual(self.remaining(), [(B,), (C,)])
+
+    def test_insert_trigger_is_safe_but_delete_trigger_is_rejected(self):
+        self.sql(self.state, '''
+            CREATE TRIGGER timestamp AFTER INSERT ON threads
+            BEGIN UPDATE threads SET title=NEW.title WHERE id=NEW.id; END;
+        ''')
+        code, out = self.run_cli('thread', A, '--dry-run')
+        self.assertEqual(code, 0, out)
+        self.sql(self.state, '''
+            CREATE TRIGGER unsafe AFTER DELETE ON threads
+            BEGIN DELETE FROM threads; END;
+        ''')
+        before = self.snapshot()
+        self.assertEqual(self.run_cli('all')[0], 6)
+        self.assertEqual(self.snapshot(), before)
 
     def test_uuid_deletion(self):
         self.assertEqual(self.run_cli('thread', A)[0], 0)
