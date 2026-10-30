@@ -16,19 +16,26 @@ TABLES = {
         'local_thread_catalog': ('thread_id', 'host_id', 'display_title', 'cwd'),
         'local_thread_catalog_scan_entries': ('thread_id', 'host_id'),
         'thread_timeline_ledger': ('thread_id', 'host_id'),
+        'inbox_items': ('thread_id',),
+        'automation_runs': ('thread_id',),
+        'live_visualization_suggestions': ('thread_id', 'host_id'),
     },
     'state': {
         'threads': ('id', 'rollout_path', 'cwd', 'title'),
         'thread_dynamic_tools': ('thread_id',),
         'thread_attachments': ('thread_id',),
         'thread_spawn_edges': ('parent_thread_id', 'child_thread_id'),
+        'guardian_review_feedback': ('thread_id',),
+        'thread_read_receipts': ('thread_id',),
     },
     'history': {name: ('thread_id',) for name in (
         'thread_turns', 'thread_items', 'thread_history_projection_state',
-        'thread_realtime_items', 'inbox_items')},
+        'thread_realtime_items')},
 }
 DB_PATHS = {'desktop': 'sqlite/codex-dev.db', 'state': 'state_5.sqlite',
             'history': 'thread_history_1.sqlite'}
+REFERENCE_ONLY = {'inbox_items', 'automation_runs', 'live_visualization_suggestions',
+                  'guardian_review_feedback', 'thread_read_receipts'}
 AUX = {
     'local_thread_catalog_metadata': ('id', 'catalog_revision'),
     'local_thread_catalog_sync_state': ('host_id', 'watermark_updated_at',
@@ -114,7 +121,18 @@ class Store:
                 if name not in TABLES[kind] and name not in AUX and (
                         'thread_id' in cols or 'parent_thread_id' in cols):
                     fail_schema('unknown thread table: ' + name)
-            for trigger in db.execute("SELECT tbl_name FROM sqlite_master WHERE type='trigger'"):
+            for trigger in db.execute("SELECT tbl_name,sql FROM sqlite_master WHERE type='trigger'"):
+                # These events cannot fire during thread deletion or project_id
+                # foreign-key updates. Keep rejecting DELETE and general UPDATE.
+                if kind == 'state' and trigger[0] == 'threads' and re.match(
+                        r'CREATE\s+TRIGGER\s+\w+\s+AFTER\s+(?:INSERT|UPDATE\s+OF\s+(?:created_at|updated_at))\s+ON\s+threads\b',
+                        trigger[1], re.IGNORECASE):
+                    continue
+                if kind == 'history' and ' '.join(trigger[1].split()) == (
+                        'CREATE TRIGGER thread_realtime_items_projection_cleanup '
+                        'AFTER DELETE ON thread_history_projection_state BEGIN '
+                        'DELETE FROM thread_realtime_items WHERE thread_id = OLD.thread_id; END'):
+                    continue
                 if trigger[0] in (*TABLES[kind], *AUX):
                     fail_schema('unsupported mutation trigger: ' + trigger[0])
             if kind == 'desktop' and 'local_thread_catalog' in schema:
@@ -132,6 +150,10 @@ class Store:
                 continue
             for table in tables:
                 if table not in self.schema[kind]:
+                    continue
+                # Auxiliary records must not promote remote or unassigned references
+                # into local deletion targets.
+                if table in REFERENCE_ONLY:
                     continue
                 columns = list(TABLES[kind][table])
                 if 'project_id' in self.schema[kind][table]:
@@ -172,8 +194,6 @@ class Store:
                 tid = meta.get('id') or (match[1] if match else None)
                 if not isinstance(tid, str) or not UUID.fullmatch(tid):
                     fail_schema('unrecognized rollout: ' + str(path))
-                if match and match[1] != tid:
-                    fail_schema('rollout identity mismatch')
                 self.add_rollout(tid, path)
                 self.rows.setdefault(tid, []).append({'cwd': meta.get('cwd')})
         if self.global_path.exists():
@@ -198,12 +218,25 @@ class Store:
         if not path.is_absolute():
             path = self.home / path
         resolved = path.resolve()
-        match = re.search(r'(' + UUID.pattern + r')\.jsonl$', path.name)
-        if match and match[1] != tid:
-            fail_schema('stored rollout identity mismatch')
         roots = [self.home / n for n in ('sessions', 'archived_sessions')]
         if path.is_symlink() or not any(resolved.is_relative_to(root) for root in roots):
             fail_schema('rollout outside supported session directories')
+        # Resumed rollouts can have a new filename UUID while retaining the
+        # original session identity in their metadata. Missing files are ghosts.
+        if path.exists():
+            with path.open() as stream:
+                try:
+                    first = json.loads(stream.readline())
+                except (ValueError, UnicodeError):
+                    fail_schema('invalid rollout metadata: ' + str(path))
+            if not isinstance(first, dict):
+                fail_schema('invalid rollout record')
+            meta = first.get('payload', {}) if first.get('type') == 'session_meta' else {}
+            if not isinstance(meta, dict):
+                fail_schema('invalid rollout metadata')
+            match = re.search(r'(' + UUID.pattern + r')\.jsonl$', path.name)
+            if (meta.get('id') or (match[1] if match else None)) != tid:
+                fail_schema('stored rollout identity mismatch')
         self.rollouts.setdefault(tid, set()).add(resolved)
 
     def load_projects(self):
@@ -296,7 +329,7 @@ class Store:
             return '(parent_thread_id=? OR child_thread_id=?)', [tid, tid]
         column = 'id' if table == 'threads' else 'thread_id'
         where, params = column + '=?', [tid]
-        if kind == 'desktop':
+        if kind == 'desktop' and 'host_id' in TABLES[kind][table]:
             where += ' AND host_id IN (' + ','.join('?' for _ in self.local_hosts) + ')'
             params.extend(sorted(self.local_hosts))
         return where, params
