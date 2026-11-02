@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[1]
 TEST_SCRIPT = ROOT / "test.sh"
 
 
@@ -39,7 +39,7 @@ class TestRunnerTests(unittest.TestCase):
     def test_no_argument_keeps_full_discovery_in_isolated_environment(self):
         result = self.run_tests()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(f"unittest discover -s {ROOT}/ai/common/tests\n", result.stdout)
+        self.assertIn(f"unittest discover -s {ROOT}/tests\n", result.stdout)
         self.assertNotIn(" -p ", result.stdout)
         self.assertIn("SANDBOX=/tmp/dotfiles-test.", result.stdout)
         self.assertIn("HOME=/tmp/dotfiles-test.", result.stdout)

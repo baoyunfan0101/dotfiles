@@ -4,7 +4,7 @@ import shutil
 import subprocess
 import unittest
 
-from workflow_helpers import WorkflowTestCase, COMMON
+from workflow_helpers import WorkflowTestCase, WORKFLOW
 
 
 class WorkflowDeliveryTests(WorkflowTestCase):
@@ -599,7 +599,7 @@ class WorkflowDeliveryTests(WorkflowTestCase):
     def test_pr_selection_ignores_same_named_fork_branch(self):
         prs_path = self.root / "prs.json"
         body_path = self.root / "body.txt"
-        helper = COMMON / "lib/git-workflow/pr-summary.py"
+        helper = WORKFLOW / "lib/git-workflow/pr-summary.py"
         fork = {"url": "https://github.com/owner/dotfiles/pull/2", "baseRefName": "main",
                 "body": "fork", "headRepository": {"nameWithOwner": "other/dotfiles"}}
         own = {"url": "https://github.com/owner/dotfiles/pull/1", "baseRefName": "develop",
@@ -623,7 +623,7 @@ class WorkflowDeliveryTests(WorkflowTestCase):
     def test_pr_selection_requires_verifiable_repository_identity(self):
         prs_path = self.root / "prs.json"
         body_path = self.root / "body.txt"
-        helper = COMMON / "lib/git-workflow/pr-summary.py"
+        helper = WORKFLOW / "lib/git-workflow/pr-summary.py"
         own = {"url": "https://github.com/owner/dotfiles/pull/1", "baseRefName": "main",
                "body": "own", "headRepository": {"nameWithOwner": "owner/dotfiles"}}
         prs_path.write_text(json.dumps([own]))

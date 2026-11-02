@@ -9,11 +9,11 @@ import unittest
 from sandbox import isolated_environment
 
 
-COMMON = Path(__file__).resolve().parents[1]
+WORKFLOW = Path(__file__).resolve().parents[1] / "workflow"
 
-DEFAULT_SETTINGS = runpy.run_path(str(COMMON / "bin/agent-project"))["DEFAULT_SETTINGS"]
+DEFAULT_SETTINGS = runpy.run_path(str(WORKFLOW / "bin/agent-project"))["DEFAULT_SETTINGS"]
 
-CLI = COMMON / "bin/git-workflow"
+CLI = WORKFLOW / "bin/git-workflow"
 
 
 class WorkflowTestCase(unittest.TestCase):
@@ -26,10 +26,10 @@ class WorkflowTestCase(unittest.TestCase):
         self.repo.mkdir()
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        (self.bin / "agent-project").symlink_to(COMMON / "bin/agent-project")
+        (self.bin / "agent-project").symlink_to(WORKFLOW / "bin/agent-project")
         self.env = isolated_environment(self.root)
         self.env["PATH"] = f"{self.bin}:{self.env['PATH']}"
-        shutil.copyfile(COMMON / "tests/stubs/gh", self.bin / "gh")
+        shutil.copyfile(WORKFLOW.parent / "tests" / "stubs" / "gh", self.bin / "gh")
         (self.bin / "gh").chmod(0o755)
         self.git("init", "-q", "-b", "main")
         self.git("init", "-q", "--bare", str(self.remote))
@@ -77,7 +77,7 @@ class WorkflowTestCase(unittest.TestCase):
 
     def stub_gh(self):
         path = self.bin / "gh"
-        shutil.copyfile(COMMON / "tests/stubs/gh-pr", path)
+        shutil.copyfile(WORKFLOW.parent / "tests" / "stubs" / "gh-pr", path)
         path.chmod(0o755)
         self.env["GH_LOG"] = str(self.root / "gh.log")
         self.env["GH_STATE"] = str(self.root / "pr.json")

@@ -1,12 +1,4 @@
-# Shared agent instructions
-
-## Authoring
-
-- Match the user's latest language in responses unless requested otherwise.
-- Use ASCII in project files unless requested otherwise.
-- Preserve existing comments while their code or section remains unless requested otherwise.
-- Do not create backups directly; use configured workflows.
-- Wrap Markdown containing fenced code blocks in an outer `~~~md` fence.
+# Workflow instructions
 
 ## Project Configuration
 

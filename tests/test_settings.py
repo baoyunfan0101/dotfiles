@@ -13,7 +13,7 @@ from unittest import mock
 from sandbox import isolated_environment
 
 
-PROJECT = Path(__file__).resolve().parents[1] / "bin/agent-project"
+PROJECT = Path(__file__).resolve().parents[1] / "workflow" / "bin" / "agent-project"
 
 
 class SettingsTests(unittest.TestCase):
@@ -279,7 +279,7 @@ class SettingsTests(unittest.TestCase):
 
     def test_repository_configuration_is_complete(self):
         model = runpy.run_path(str(PROJECT))
-        settings = json.loads((PROJECT.parents[3] / ".ai/project.json").read_text())
+        settings = json.loads((PROJECT.parents[2] / ".ai/project.json").read_text())
         model["validate_structure"](settings, model["SCHEMA"])
         model["validate_values"](settings)
         self.assertEqual(settings["schemaVersion"], 1)

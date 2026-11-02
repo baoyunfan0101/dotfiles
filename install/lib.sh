@@ -4,6 +4,7 @@ INSTALL_AGENTS=()
 FORCE=false
 CLEAN=false
 
+# Retain the existing state path and common manifest for installed versions.
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/ai"
 
 MODULE_NAME=""
@@ -200,7 +201,11 @@ array_contains() {
 
 module_reset() {
   MODULE_NAME="$1"
-  MODULE_DIR="$AI_DIR/$MODULE_NAME"
+  if [[ "$MODULE_NAME" == common ]]; then
+    MODULE_DIR="$DOTFILES_ROOT"
+  else
+    MODULE_DIR="$DOTFILES_ROOT/adapters/$MODULE_NAME"
+  fi
   MODULE_SOURCES=()
   MODULE_TARGETS=()
   MODULE_BLOCK_SOURCES=()
@@ -284,14 +289,18 @@ load_module() {
   local module="$1"
   local module_file
 
-  module_file="$AI_DIR/$module/module.sh"
+  module_reset "$module"
+  if [[ "$module" == common ]]; then
+    module_file="$DOTFILES_ROOT/install/module.sh"
+  else
+    module_file="$MODULE_DIR/module.sh"
+  fi
 
   if [[ ! -f "$module_file" ]]; then
     echo "Unknown module: $module" >&2
     return 1
   fi
 
-  module_reset "$module"
   source "$module_file"
 }
 

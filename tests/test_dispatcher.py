@@ -10,9 +10,9 @@ import unittest
 from sandbox import isolated_environment
 
 
-ROOT = Path(__file__).resolve().parents[3]
-PROBE = ROOT / "ai/common/libexec/agent-workflow-opt-in"
-DEFAULT_SETTINGS = runpy.run_path(str(ROOT / "ai/common/bin/agent-project"))["DEFAULT_SETTINGS"]
+ROOT = Path(__file__).resolve().parents[1]
+PROBE = ROOT / "workflow" / "libexec" / "agent-workflow-opt-in"
+DEFAULT_SETTINGS = runpy.run_path(str(ROOT / "workflow" / "bin" / "agent-project"))["DEFAULT_SETTINGS"]
 
 
 class DispatcherTests(unittest.TestCase):

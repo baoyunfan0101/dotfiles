@@ -8,7 +8,7 @@ import unittest
 from sandbox import isolated_environment
 
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[1]
 BASH = shutil.which("bash")
 
 
@@ -20,7 +20,9 @@ class BootstrapTests(unittest.TestCase):
         self.env = isolated_environment(self.root)
         self.source = self.root / "source"
         self.source.mkdir()
-        shutil.copytree(ROOT / "ai", self.source / "ai")
+        for directory in ("workflow", "rules", "adapters", "install"):
+            shutil.copytree(ROOT / directory, self.source / directory)
+        shutil.copy2(ROOT / "instructions.md", self.source / "instructions.md")
         shutil.copy2(ROOT / "install.sh", self.source / "install.sh")
         self.git("init", "-q", "-b", "main", cwd=self.source)
         self.git("add", ".", cwd=self.source)
@@ -48,15 +50,18 @@ class BootstrapTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text()
         quick_start = readme.split("## Quick Start\n", 1)[1].split("\n## ", 1)[0]
         blocks = re.findall(r"```bash\n(.*?)\n```", quick_start, flags=re.DOTALL)
-        self.assertEqual(len(blocks), 2)
+        self.assertEqual(len(blocks), 1)
         self.assertEqual(blocks[0],
                          "curl -fsSL https://raw.githubusercontent.com/baoyunfan0101/dotfiles/main/install.sh | bash")
-        self.assertLess(quick_start.index("Run the following commands inside the Git repository"),
-                        quick_start.index("cd /path/to/your/repository"))
+        self.assertIn("(workflow/README.md#quick-start)", quick_start)
+        workflow_readme = (ROOT / "workflow" / "README.md").read_text()
+        workflow_setup = workflow_readme.split("## Quick Start\n", 1)[1].split("\n## ", 1)[0]
+        self.assertLess(workflow_setup.index("Run the following commands inside the Git repository"),
+                        workflow_setup.index("cd /path/to/your/repository"))
         commands = ("cd /path/to/your/repository",
                     "agent-project set workflow.enabled true",
                     "agent-project effective", "agent-project --help", "git-workflow --help")
-        positions = [blocks[1].index(command) for command in commands]
+        positions = [workflow_setup.index(command) for command in commands]
         self.assertEqual(positions, sorted(positions))
 
     def test_first_install_and_repeated_run_converge(self):
@@ -76,7 +81,7 @@ class BootstrapTests(unittest.TestCase):
                         result.stdout.index("agent-project set workflow.enabled true"))
         self.assertTrue(self.project_cli.is_symlink())
         self.assertEqual(self.project_cli.resolve(),
-                         (self.checkout / "ai/common/bin/agent-project").resolve())
+                         (self.checkout / "workflow" / "bin" / "agent-project").resolve())
         original_head = self.git("rev-parse", "HEAD", cwd=self.checkout)
 
         result = self.bootstrap()
@@ -84,13 +89,13 @@ class BootstrapTests(unittest.TestCase):
         self.assertIn("dotfiles installed.", result.stdout)
         self.assertEqual(self.git("rev-parse", "HEAD", cwd=self.checkout), original_head)
         self.assertEqual(self.project_cli.resolve(),
-                         (self.checkout / "ai/common/bin/agent-project").resolve())
+                         (self.checkout / "workflow" / "bin" / "agent-project").resolve())
 
     def test_existing_checkout_updates_and_repairs_managed_target(self):
         self.assertEqual(self.bootstrap().returncode, 0)
         self.project_cli.unlink()
         self.project_cli.write_text("outdated\n")
-        (self.source / "ai/common/instructions.md").write_text("updated\n")
+        (self.source / "workflow" / "instructions.md").write_text("updated\n")
         self.git("add", ".", cwd=self.source)
         self.git("commit", "-qm", "Update", cwd=self.source)
         self.git("push", "-q", "origin", "main", cwd=self.source)
@@ -101,7 +106,7 @@ class BootstrapTests(unittest.TestCase):
         self.assertTrue(self.project_cli.is_symlink())
         self.assertEqual(self.git("rev-parse", "HEAD", cwd=self.checkout),
                          self.git("rev-parse", "HEAD", cwd=self.source))
-        self.assertEqual((self.checkout / "ai/common/instructions.md").read_text(),
+        self.assertEqual((self.checkout / "workflow" / "instructions.md").read_text(),
                          "updated\n")
 
     def test_unmanaged_declared_target_is_replaced_without_touching_other_files(self):
@@ -117,7 +122,7 @@ class BootstrapTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(self.project_cli.is_symlink())
             self.assertEqual(self.project_cli.resolve(),
-                             (self.checkout / "ai/common/bin/agent-project").resolve())
+                             (self.checkout / "workflow" / "bin" / "agent-project").resolve())
             self.assertEqual(personal_file.read_text(), "keep me\n")
             self.assertTrue(agents_file.read_text().startswith("personal agent rules\n"))
             self.assertEqual(agents_file.read_text().count(
@@ -132,9 +137,9 @@ class BootstrapTests(unittest.TestCase):
         self.assertIn("git is required", result.stderr)
 
         self.assertEqual(self.bootstrap().returncode, 0)
-        (self.checkout / "ai/common/instructions.md").write_text("local change\n")
+        (self.checkout / "workflow" / "instructions.md").write_text("local change\n")
         result = self.bootstrap()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("local changes", result.stderr)
-        self.assertEqual((self.checkout / "ai/common/instructions.md").read_text(),
+        self.assertEqual((self.checkout / "workflow" / "instructions.md").read_text(),
                          "local change\n")

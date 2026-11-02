@@ -5,7 +5,7 @@ import subprocess
 import unittest
 from sandbox import isolated_environment
 
-from workflow_helpers import WorkflowTestCase, COMMON
+from workflow_helpers import WorkflowTestCase, WORKFLOW
 
 
 class WorkflowCliTests(WorkflowTestCase):
@@ -70,7 +70,7 @@ class WorkflowCliTests(WorkflowTestCase):
     def test_command_executables(self):
         for action in ("prepare", "bootstrap", "sync", "backup", "commit", "undo", "restore", "revert", "cherry-pick",
                        "rebase", "merge", "push", "branch", "remote", "pr"):
-            path = COMMON / "libexec/git-workflow" / action
+            path = WORKFLOW / "libexec/git-workflow" / action
             self.assertTrue(os.access(path, os.X_OK))
             self.assertEqual(path.read_text().splitlines()[0], "#!/usr/bin/env bash")
             self.assertIn("Usage:", self.run_cli("--help", executable=path).stdout)
@@ -80,7 +80,7 @@ class WorkflowCliTests(WorkflowTestCase):
         install_env["PATH"] = self.env["PATH"]
         destination = Path(install_env["HOME"])
         self.assertIn(self.root, destination.parents)
-        result = subprocess.run([str(COMMON.parent / "install.sh"), "--agents", "codex", mode],
+        result = subprocess.run([str(WORKFLOW.parent / "install" / "install.sh"), "--agents", "codex", mode],
                                 env=install_env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         manifests = list(Path(install_env["XDG_STATE_HOME"]).glob("dotfiles/ai/*.manifest"))

@@ -12,8 +12,8 @@ import unittest
 from sandbox import isolated_environment
 
 
-COMMON = Path(__file__).resolve().parents[1]
-DEFAULT_SETTINGS = runpy.run_path(str(COMMON / "bin/agent-project"))["DEFAULT_SETTINGS"]
+WORKFLOW = Path(__file__).resolve().parents[1] / "workflow"
+DEFAULT_SETTINGS = runpy.run_path(str(WORKFLOW / "bin/agent-project"))["DEFAULT_SETTINGS"]
 GIT = shutil.which("git")
 BASH = shutil.which("bash")
 CORE_ACTIONS = ("prepare", "backup create", "backup list",
@@ -47,7 +47,7 @@ class PreflightTests(unittest.TestCase):
         (self.bin / "date").symlink_to(shutil.which("date"))
         for command in ("bash", "dirname", "readlink", "cat"):
             (self.bin / command).symlink_to(shutil.which(command))
-        (self.bin / "agent-project").symlink_to(COMMON / "bin/agent-project")
+        (self.bin / "agent-project").symlink_to(WORKFLOW / "bin/agent-project")
 
     def git(self, *args):
         return subprocess.check_output(
@@ -92,7 +92,7 @@ class PreflightTests(unittest.TestCase):
             "pr merge": [],
         }
         return subprocess.run(
-            [BASH, str(COMMON / "bin/git-workflow"), *action.split(), *arguments[action]],
+            [BASH, str(WORKFLOW / "bin/git-workflow"), *action.split(), *arguments[action]],
             cwd=self.repo if cwd is None else cwd,
             env={**self.env, "PATH": str(self.bin)},
             capture_output=True, text=True,
@@ -145,7 +145,7 @@ class PreflightTests(unittest.TestCase):
     def test_removed_commands_are_rejected(self):
         for command in ("start", "finish", "integrate"):
             result = subprocess.run(
-                [BASH, str(COMMON / "bin/git-workflow"), command],
+                [BASH, str(WORKFLOW / "bin/git-workflow"), command],
                 cwd=self.repo, env=self.env, capture_output=True, text=True,
             )
             self.assertEqual(result.returncode, 1)
@@ -248,7 +248,7 @@ class PreflightTests(unittest.TestCase):
     def test_agent_project_missing_from_installation(self):
         (self.bin / "agent-project").unlink()
         installation = self.root / "installation"
-        shutil.copytree(COMMON, installation, ignore=shutil.ignore_patterns("tests"))
+        shutil.copytree(WORKFLOW, installation, ignore=shutil.ignore_patterns("tests"))
         (installation / "bin/agent-project").unlink()
         result = subprocess.run(
             [BASH, str(installation / "bin/git-workflow"), "prepare",
