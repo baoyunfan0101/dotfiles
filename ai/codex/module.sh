@@ -5,7 +5,3 @@ module_managed_block \
   "$CODEX_HOME/AGENTS.md" \
   "<!-- BEGIN baoyunfan0101/dotfiles managed block -->" \
   "<!-- END baoyunfan0101/dotfiles managed block -->"
-
-module_dir_contents \
-  "skills" \
-  "$CODEX_HOME/skills"
