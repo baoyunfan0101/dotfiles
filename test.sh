@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 test_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-unittest_args=(discover -s "$test_root/ai/common/tests")
+unittest_args=(discover -s "$test_root/tests")
 
 if (( $# > 1 )); then
   printf 'Usage: ./test.sh [test name]\n' >&2
@@ -18,7 +18,7 @@ if (( $# == 1 )); then
     test_file='test_workflow_*.py'
   else
     test_file="test_${test_name}.py"
-    if [[ ! -f "$test_root/ai/common/tests/$test_file" ]]; then
+    if [[ ! -f "$test_root/tests/$test_file" ]]; then
       printf 'Unknown test target: %s\n' "$test_name" >&2
       exit 2
     fi
@@ -44,7 +44,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 mkdir -p "$test_sandbox/home" "$test_sandbox/tmp" "$test_sandbox/bin"
-ln -s "$test_root/ai/common/tests/stubs/gh" "$test_sandbox/bin/gh"
+ln -s "$test_root/tests/stubs/gh" "$test_sandbox/bin/gh"
 cd "$test_sandbox"
 
 env -i \

@@ -2,8 +2,8 @@ from pathlib import Path
 import unittest
 
 
-ROOT = Path(__file__).resolve().parents[3]
-INSTRUCTIONS = ROOT / "ai/common/instructions.md"
+ROOT = Path(__file__).resolve().parents[1]
+INSTRUCTIONS = ROOT / "workflow" / "instructions.md"
 
 
 def section(text, heading):
@@ -14,22 +14,25 @@ class InstructionTests(unittest.TestCase):
     def setUp(self):
         self.instructions = INSTRUCTIONS.read_text()
 
-    def test_adapter_loads_shared_instructions_only_after_opt_in(self):
-        for path in ("ai/codex/AGENTS.md", "ai/claude/CLAUDE.md"):
+    def test_adapters_load_common_entry_and_workflow_is_gated_there(self):
+        shared = (ROOT / "instructions.md").read_text()
+        for path in (Path("adapters", "codex", "AGENTS.md"),
+                     Path("adapters", "claude", "CLAUDE.md")):
             adapter = (ROOT / path).read_text()
             with self.subTest(adapter=path):
-                self.assertLess(len(adapter), 800)
-                for pattern in (
-                    r"At the start.*Git repository.*agent-workflow-opt-in.*once",
-                    r"Exit 0:.*read.*agent-workflow/instructions\.md.*follow",
-                    r"Exit 1:.*stop loading.*do not call.*agent-project.*git-workflow",
-                    r"Any other exit:.*report.*do not perform automatic Git workflow",
-                    r"explicit request.*project settings.*agent-project.*workflow is disabled",
-                ):
-                    self.assertRegex(adapter, pattern)
-        claude = (ROOT / "ai/claude/CLAUDE.md").read_text()
+                self.assertIn("${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles/instructions.md", adapter)
+                self.assertNotIn("agent-workflow-opt-in", adapter)
+        for pattern in (
+            r"At the start.*Git repository.*agent-workflow-opt-in.*once",
+            r"Exit 0:.*read.*agent-workflow/instructions\.md.*follow",
+            r"Exit 1:.*stop loading.*do not call.*agent-project.*git-workflow",
+            r"Any other exit:.*report.*do not perform automatic Git workflow",
+            r"explicit request.*project settings.*agent-project.*workflow is disabled",
+        ):
+            self.assertRegex(shared, pattern)
+        claude = (ROOT / "adapters" / "claude" / "CLAUDE.md").read_text()
         self.assertRegex(claude, r"repository root has `AGENTS\.md` but no `CLAUDE\.md`.*read `AGENTS\.md`")
-        probe = (ROOT / "ai/common/libexec/agent-workflow-opt-in").read_text()
+        probe = (ROOT / "workflow" / "libexec" / "agent-workflow-opt-in").read_text()
         for dependency in ("instructions.md", "agent-project", "git-workflow"):
             self.assertNotIn(dependency, probe)
 
@@ -93,7 +96,7 @@ class InstructionTests(unittest.TestCase):
             self.assertRegex(workflow, pattern)
 
     def test_authoring_scopes_and_accurate_reporting_are_preserved(self):
-        authoring = section(self.instructions, "## Authoring")
+        authoring = section((ROOT / "instructions.md").read_text(), "## Authoring")
         for pattern in (
             r"user's latest language.*responses unless requested otherwise",
             r"ASCII in project files unless requested otherwise",

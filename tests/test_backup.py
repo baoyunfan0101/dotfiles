@@ -11,9 +11,9 @@ import unittest
 from sandbox import isolated_environment
 
 
-COMMON = Path(__file__).resolve().parents[1]
-CLI = COMMON / "bin/git-workflow"
-DEFAULT_SETTINGS = runpy.run_path(str(COMMON / "bin/agent-project"))["DEFAULT_SETTINGS"]
+WORKFLOW = Path(__file__).resolve().parents[1] / "workflow"
+CLI = WORKFLOW / "bin/git-workflow"
+DEFAULT_SETTINGS = runpy.run_path(str(WORKFLOW / "bin/agent-project"))["DEFAULT_SETTINGS"]
 
 
 class BackupTests(unittest.TestCase):

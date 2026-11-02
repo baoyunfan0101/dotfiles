@@ -2,7 +2,7 @@ import json
 import shutil
 import unittest
 
-from workflow_helpers import WorkflowTestCase, COMMON
+from workflow_helpers import WorkflowTestCase, WORKFLOW
 
 
 class WorkflowCommitTests(WorkflowTestCase):
@@ -316,7 +316,7 @@ class WorkflowCommitTests(WorkflowTestCase):
 
 
     def test_commit_and_push_do_not_load_prepare_modules(self):
-        runtime = (COMMON / "lib/git-workflow/runtime.sh").read_text()
+        runtime = (WORKFLOW / "lib/git-workflow/runtime.sh").read_text()
         for module in ("backup.sh", "sync.sh", "branch.sh"):
             self.assertNotIn(f'source "$WORKFLOW_ROOT/lib/git-workflow/{module}"', runtime)
         self.prepare()

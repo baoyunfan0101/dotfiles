@@ -1,30 +1,27 @@
 # dotfiles
 
-A personal development environment and lightweight harness for AI coding agents. Scripts handle deterministic workflow operations so agents can focus on the task.
+A personal assistant configuration and lightweight harness for AI coding agents. Scripts handle deterministic workflow operations so agents can focus on the task.
 
 ## Structure
 
 ```text
 dotfiles/
+  AGENTS.md                     Instructions for developing this repository
+  instructions.md               Shared entry point installed for daily assistant use
   install.sh                    One-command install and update
-  .ai/
-    project.json                Complete workflow settings for this repository
-  README.md                     Project entry point
-  test.sh                       Isolated repository tests
-  ai/
-    install.sh                  Installer entry point
-    install/                    Installer helpers
+  install/                      Installer entry point, helpers, and shared file declarations
+  workflow/                     Opt-in Git workflow and project configuration
+    instructions.md             Workflow-specific agent contract
     project-settings.md         Configuration reference
-    common/                     Shared agent workflow and runtime
-      module.sh                 Managed file declarations
-      instructions.md           Minimal agent contract
-      bin/                      Public command entry points
-      libexec/git-workflow/      Command implementations
-      lib/git-workflow/          Shared workflow libraries
-      lib/agent_project/         Configuration schema, persistence, and exclusion
-      tests/                    Regression tests
-    codex/                      Codex configuration and skills
-    claude/                     Claude Code configuration
+    bin/                        Public command entry points
+    libexec/git-workflow/        Command implementations
+    lib/git-workflow/            Shared workflow libraries
+    lib/agent_project/           Configuration schema, persistence, and exclusion
+  adapters/                     Tool-specific entry points and install declarations
+    codex/
+    claude/
+  tests/                        Isolated regression tests and fixtures
+  test.sh                       Test runner
 ```
 
 ## Quick Start
@@ -48,13 +45,18 @@ agent-project --help
 git-workflow --help
 ```
 
-Use CLI help for command details and [Project Settings](ai/project-settings.md) for the full configuration reference.
+Use CLI help for command details and [Project Settings](workflow/project-settings.md) for the full configuration reference.
+
+The shared entry point is installed at `${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles/instructions.md`.
+It is independent of workflow opt-in and also applies outside Git repositories.
+The repository-root `AGENTS.md` governs development here; it is not the installed shared entry point.
+Workflow commands and their installed paths remain unchanged by the source layout.
 
 ## AI Workflow
 
 Installing dotfiles makes the workflow available globally, but each repository decides whether to use it. The built-in default is `workflow.enabled = false`.
 
-The Codex and Claude Code global adapters check the project's opt-in flag before loading shared workflow instructions. Projects without an enabled workflow do not load that guidance or run workflow commands for activation discovery.
+The Codex and Claude Code adapters load the same shared `instructions.md` entry point, including general authoring requirements. That entry checks the project's opt-in flag before loading `workflow/instructions.md`. Projects without an enabled workflow do not load that guidance or run workflow commands for activation discovery.
 
 For an enabled repository:
 
@@ -87,7 +89,7 @@ Delivery                 -> explicit user authorization
 
 `prepare` verifies a persistent local backup before discarding selected changes. It never automatically applies or deletes that backup, including on failure. Use `backup apply <id>` only for explicit recovery onto the current working state.
 
-Bootstrap creates and publishes the first commit in an empty repository. `--all` respects Git's effective ignore rules. Before development advances, `bootstrap --amend` can correct the published root commit using an exact remote lease; `bootstrap --retry-amend` recovers a failed publication. See [Project Settings](ai/project-settings.md) for the restrictions and recovery behavior.
+Bootstrap creates and publishes the first commit in an empty repository. `--all` respects Git's effective ignore rules. Before development advances, `bootstrap --amend` can correct the published root commit using an exact remote lease; `bootstrap --retry-amend` recovers a failed publication. See [Project Settings](workflow/project-settings.md) for the restrictions and recovery behavior.
 
 A working branch may contain multiple Task Specs and logical commits when continuation is explicitly requested. PR submission, merging, and local integration each require explicit authorization; task completion and CI success do not authorize merging.
 
@@ -126,7 +128,7 @@ agent-project unset git.integration.mode
 
 Project-specific Agent rules belong in the repository-root `AGENTS.md`. Claude Code reads it through the global adapter when the repository has no `CLAUDE.md`. They are independent of `.ai/project.json`: a project can have Agent rules without using this Git workflow, or use the workflow without additional Agent rules.
 
-See [Project Settings](ai/project-settings.md) for the complete configuration reference.
+See [Project Settings](workflow/project-settings.md) for the complete configuration reference.
 
 ## Testing
 
@@ -136,7 +138,7 @@ See [Project Settings](ai/project-settings.md) for the complete configuration re
 
 GitHub Actions runs the same test command for pull requests targeting `main`.
 
-Workflow tests are grouped by responsibility in `ai/common/tests/test_workflow_*.py` and share isolated fixtures in `workflow_helpers.py`. Run the group with `./test.sh workflow`, or a focused module such as `./test.sh workflow_prepare`.
+Workflow tests are grouped by responsibility in `tests/test_workflow_*.py` and share isolated fixtures in `workflow_helpers.py`. Run the group with `./test.sh workflow`, or a focused module such as `./test.sh workflow_prepare`.
 
 Tests use temporary homes, repositories, local bare remotes, isolated configuration directories, and a stubbed `gh`. Both installer modes run inside the sandbox, which is removed on exit. Tests do not install into the real user environment or contact GitHub.
 
@@ -159,31 +161,31 @@ Dotfiles does not own the entire `~/.codex/AGENTS.md` or `~/.claude/CLAUDE.md` f
 For development from an existing checkout, install using symlinks:
 
 ```bash
-./ai/install.sh --agents codex
+./install/install.sh --agents codex
 ```
 
 Install by copying files:
 
 ```bash
-./ai/install.sh --agents codex --copy
+./install/install.sh --agents codex --copy
 ```
 
 Select multiple agents with a comma-separated list:
 
 ```bash
-./ai/install.sh --agents codex,claude
+./install/install.sh --agents codex,claude
 ```
 
-The shared `common` module is installed with the selected agents. For all installer options, run:
+Shared content is installed with the selected adapters. The existing `common` installation manifest and state directory are retained for updates from older layouts. For all installer options, run:
 
 ```bash
-./ai/install.sh --help
+./install/install.sh --help
 ```
 
 ## Uninstall
 
 ```bash
-./ai/install.sh --agents codex --uninstall
+./install/install.sh --agents codex --uninstall
 ```
 
-The shared `common` module is removed automatically when no installed agent modules remain.
+Shared content is removed automatically when no installed adapters remain.

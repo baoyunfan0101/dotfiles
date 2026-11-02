@@ -6,15 +6,15 @@ import unittest
 from sandbox import isolated_environment
 
 
-ROOT = Path(__file__).resolve().parents[3]
-INSTALLER = ROOT / "ai/install.sh"
+ROOT = Path(__file__).resolve().parents[1]
+INSTALLER = ROOT / "install" / "install.sh"
 BEGIN = "<!-- BEGIN baoyunfan0101/dotfiles managed block -->"
 END = "<!-- END baoyunfan0101/dotfiles managed block -->"
 
 
 class ManagedBlockInstallTests(unittest.TestCase):
     AGENT = "codex"
-    SOURCE = ROOT / "ai/codex/AGENTS.md"
+    SOURCE = ROOT / "adapters" / "codex" / "AGENTS.md"
     HOME_VARIABLE = "CODEX_HOME"
     TARGET_NAME = "AGENTS.md"
 
@@ -36,6 +36,40 @@ class ManagedBlockInstallTests(unittest.TestCase):
         self.assertEqual(content.count(BEGIN), 1)
         self.assertEqual(content.count(END), 1)
         self.assertIn(self.block(), content)
+
+    def test_shared_entry_survives_until_last_adapter_is_uninstalled(self):
+        result = subprocess.run([str(INSTALLER), "--agents", "codex,claude"],
+                                env=self.env, cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        shared = Path(self.env["XDG_CONFIG_HOME"]) / "dotfiles" / "instructions.md"
+        self.assertEqual(shared.read_text(), (ROOT / "instructions.md").read_text())
+        for agent in ("codex", "claude"):
+            result = subprocess.run([str(INSTALLER), "--agents", agent, "--uninstall"],
+                                    env=self.env, cwd=self.root, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(shared.exists(), agent != "claude")
+
+    def test_update_repairs_old_layout_symlinks_using_existing_manifest(self):
+        # A checkout update leaves old symlinks dangling until the installer repairs them.
+        config = Path(self.env["XDG_CONFIG_HOME"])
+        targets = (
+            (Path(self.env["HOME"]) / ".local" / "bin" / "agent-project",
+             ROOT / "workflow" / "bin" / "agent-project"),
+            (config / "agent-workflow" / "instructions.md",
+             ROOT / "workflow" / "instructions.md"),
+        )
+        manifest = Path(self.env["XDG_STATE_HOME"]) / "dotfiles" / "ai" / "common.manifest"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text("".join(str(target) + "\n" for target, _ in targets))
+        for target, _ in targets:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.symlink_to(self.root / "removed-old-source")
+        for mode in ("--symlink", "--copy"):
+            result = self.install(mode, "--clean")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for target, source in targets:
+                self.assertEqual(target.read_bytes(), source.read_bytes())
+                self.assertEqual(target.is_symlink(), mode == "--symlink")
 
     def test_new_file_contains_one_managed_block(self):
         result = self.install("--symlink")
@@ -99,6 +133,6 @@ class ManagedBlockInstallTests(unittest.TestCase):
 
 class ClaudeManagedBlockInstallTests(ManagedBlockInstallTests):
     AGENT = "claude"
-    SOURCE = ROOT / "ai/claude/CLAUDE.md"
+    SOURCE = ROOT / "adapters" / "claude" / "CLAUDE.md"
     HOME_VARIABLE = "CLAUDE_CONFIG_DIR"
     TARGET_NAME = "CLAUDE.md"

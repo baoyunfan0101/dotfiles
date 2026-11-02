@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-AI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DOTFILES_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-source "$AI_DIR/install/lib.sh"
+source "$DOTFILES_ROOT/install/lib.sh"
 
 parse_install_args "$@"
 
