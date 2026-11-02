@@ -31,3 +31,7 @@ module_path \
 module_path \
   "instructions.md" \
   "${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles/instructions.md"
+
+module_path \
+  "rules" \
+  "${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles/rules"

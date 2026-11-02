@@ -71,6 +71,28 @@ class ManagedBlockInstallTests(unittest.TestCase):
                 self.assertEqual(target.read_bytes(), source.read_bytes())
                 self.assertEqual(target.is_symlink(), mode == "--symlink")
 
+    def test_rules_install_outside_git_and_are_removed_with_shared_content(self):
+        config = Path(self.env["XDG_CONFIG_HOME"]) / "dotfiles"
+        filename = "explaining-unfamiliar-topics.md"
+        for mode in ("--symlink", "--copy"):
+            with self.subTest(mode=mode):
+                result = subprocess.run([str(INSTALLER), "--agents", self.AGENT, mode],
+                                        env=self.env, cwd=self.root, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((config / "rules" / filename).read_bytes(),
+                                 (ROOT / "rules" / filename).read_bytes())
+                self.assertEqual((config / "rules").is_symlink(), mode == "--symlink")
+                shared = (config / "instructions.md").read_text()
+                self.assertLess(shared.index("## Rules"), shared.index("## Workflow Loading"))
+                self.assertNotIn(filename, (ROOT / "workflow" / "instructions.md").read_text())
+                self.assertNotIn(filename, self.target.read_text())
+                probe = Path(self.env["HOME"]) / ".local" / "libexec" / "agent-workflow-opt-in"
+                result = subprocess.run([str(probe)], env=self.env, cwd=self.root,
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(self.install("--uninstall").returncode, 0)
+                self.assertFalse((config / "rules").exists())
+
     def test_new_file_contains_one_managed_block(self):
         result = self.install("--symlink")
         self.assertEqual(result.returncode, 0, result.stderr)

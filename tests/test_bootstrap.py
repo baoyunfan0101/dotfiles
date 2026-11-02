@@ -20,7 +20,7 @@ class BootstrapTests(unittest.TestCase):
         self.env = isolated_environment(self.root)
         self.source = self.root / "source"
         self.source.mkdir()
-        for directory in ("workflow", "adapters", "install"):
+        for directory in ("workflow", "rules", "adapters", "install"):
             shutil.copytree(ROOT / directory, self.source / directory)
         shutil.copy2(ROOT / "instructions.md", self.source / "instructions.md")
         shutil.copy2(ROOT / "install.sh", self.source / "install.sh")

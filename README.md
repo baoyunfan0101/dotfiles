@@ -10,6 +10,8 @@ dotfiles/
   instructions.md               Shared entry point installed for daily assistant use
   install.sh                    One-command install and update
   install/                      Installer entry point, helpers, and shared file declarations
+  rules/                        Shared response and task requirements
+    explaining-unfamiliar-topics.md
   workflow/                     Opt-in Git workflow and project configuration
     instructions.md             Workflow-specific agent contract
     project-settings.md         Configuration reference
@@ -51,6 +53,17 @@ The shared entry point is installed at `${XDG_CONFIG_HOME:-$HOME/.config}/dotfil
 It is independent of workflow opt-in and also applies outside Git repositories.
 The repository-root `AGENTS.md` governs development here; it is not the installed shared entry point.
 Workflow commands and their installed paths remain unchanged by the source layout.
+
+## Rules
+
+Shared rules apply independently of Git workflow opt-in. The shared entry point
+states when to read each rule; adapters do not duplicate those conditions.
+
+[Explaining Unfamiliar Topics](rules/explaining-unfamiliar-topics.md) applies when
+explaining something the user is unfamiliar with. Its requirements and example
+are preserved as authored, with Markdown heading and spacing adjustments only.
+Rules are installed at `${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles/rules` in both
+symlink and copy modes, and removed with the last installed adapter.
 
 ## AI Workflow
 
