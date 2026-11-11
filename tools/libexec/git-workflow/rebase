@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/mutation.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/sync.sh"
+
+CURRENT_ACTION="rebase"
+requested_base=""
+refresh_committer_date=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --base)
+      [[ $# -ge 2 && -n "$2" ]] || fail "missing value for --base"
+      requested_base="$2"
+      shift 2
+      ;;
+    --base=*)
+      requested_base="${1#*=}"
+      [[ -n "$requested_base" ]] || fail "missing value for --base"
+      shift
+      ;;
+    --refresh-committer-date)
+      refresh_committer_date=true
+      shift
+      ;;
+    -h|--help) usage; exit 0 ;;
+    *) fail "unknown rebase option: $1" ;;
+  esac
+done
+
+preflight_core
+require_repository
+if ! project_workflow_enabled; then
+  printf '[git] rebase skip reason=workflow-disabled\n'
+  exit 0
+fi
+
+branch="$(current_branch)"
+require_working_branch "$branch"
+require_clean_worktree
+load_commit_settings
+base="$(resolve_configured_base "$requested_base")"
+remote="$(remote_for_branch "$branch" "$base")"
+original_head="$(git rev-parse HEAD)"
+previous_remote_sha="$(remote_branch_sha "$remote" "$branch")"
+verify_rewrite_source "$branch" "$remote" "$previous_remote_sha" "$original_head"
+git fetch --quiet "$remote" "refs/heads/$base:refs/remotes/$remote/$base" || fail "cannot fetch base: $base"
+base_ref="refs/remotes/$remote/$base"
+git rev-parse --verify "$base_ref^{commit}" >/dev/null || fail "base is not resolvable: $base"
+
+replay() {
+  if [[ "$refresh_committer_date" == true ]]; then
+    git rebase --quiet "$base_ref"
+  else
+    rebase_preserving_dates "$base_ref"
+  fi
+}
+
+if ! replay; then
+  restore_failed_sequence rebase "$branch" "$original_head"
+fi
+new_head="$(git rev-parse HEAD)"
+if [[ "$new_head" != "$original_head" ]]; then
+  record_rewrite "$branch" "$remote" "$previous_remote_sha" "$new_head"
+fi
+if [[ "$COMMIT_MODE" == autoCommitAndPush && "$new_head" != "$original_head" ]]; then
+  publish_rewrite "$branch" "$remote" "$previous_remote_sha" || fail "rebase completed locally but lease-safe push failed"
+  pushed=true
+else
+  pushed=false
+fi
+printf '[git] rebase ok base=%s sha=%s branch=%s pushed=%s pr=%s\n' \
+  "$base" "${new_head:0:7}" "$branch" "$pushed" "$PR_SYNC_STATUS"

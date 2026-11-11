@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/mutation.sh"
+
+COMMIT_MESSAGE=""
+COMMIT_MESSAGE_GIVEN=false
+COMMIT_AMEND=false
+COMMIT_REFRESH_COMMITTER_DATE=false
+COMMIT_DATE_SOURCE=""
+COMMIT_ALL=false
+COMMIT_OVERRIDE_MANUAL=false
+COMMIT_PATHS=()
+COMMIT_PATH_COUNT=0
+
+parse_commit_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --message)
+        [[ $# -ge 2 ]] || fail "missing value for --message"
+        COMMIT_MESSAGE="$2"
+        COMMIT_MESSAGE_GIVEN=true
+        shift 2
+        ;;
+      --message=*)
+        COMMIT_MESSAGE="${1#*=}"
+        COMMIT_MESSAGE_GIVEN=true
+        shift
+        ;;
+      --amend)
+        COMMIT_AMEND=true
+        shift
+        ;;
+      --refresh-committer-date)
+        COMMIT_REFRESH_COMMITTER_DATE=true
+        shift
+        ;;
+      --reuse-dates-from)
+        [[ $# -ge 2 && -n "$2" ]] || fail "missing commit after --reuse-dates-from"
+        COMMIT_DATE_SOURCE="$2"
+        shift 2
+        ;;
+      --all)
+        COMMIT_ALL=true
+        shift
+        ;;
+      --override-manual)
+        COMMIT_OVERRIDE_MANUAL=true
+        shift
+        ;;
+      --)
+        shift
+        while [[ $# -gt 0 ]]; do
+          COMMIT_PATHS+=("$1")
+          ((COMMIT_PATH_COUNT += 1))
+          shift
+        done
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        fail "unknown commit option: $1"
+        ;;
+    esac
+  done
+
+  [[ "$COMMIT_AMEND" != true || -z "$COMMIT_DATE_SOURCE" ]] ||
+    fail "--reuse-dates-from is for new commits"
+  [[ "$COMMIT_REFRESH_COMMITTER_DATE" != true || "$COMMIT_AMEND" == true ]] ||
+    fail "--refresh-committer-date requires --amend"
+
+  if [[ "$COMMIT_AMEND" != true || "$COMMIT_MESSAGE_GIVEN" == true ]]; then
+    [[ -n "$COMMIT_MESSAGE" ]] || fail "--message is required"
+  fi
+
+  if [[ "$COMMIT_ALL" == true && "$COMMIT_PATH_COUNT" -gt 0 ]]; then
+    fail "--all cannot be combined with explicit paths"
+  fi
+
+  if [[ "$COMMIT_ALL" != true && "$COMMIT_PATH_COUNT" -eq 0 ]]; then
+    fail "use --all or provide paths after --"
+  fi
+}
+
+commit_changes() {
+  CURRENT_ACTION="commit"
+  local branch
+  local commit_sha
+  local original_head
+  local remote
+  local remote_sha
+  local pushed=false
+  local message_args=()
+  local original_index_tree
+
+  parse_commit_args "$@"
+  preflight_core
+  require_repository
+
+  if ! project_workflow_enabled; then
+    printf '[git] commit skip reason=workflow-disabled\n'
+    return 0
+  fi
+
+  load_commit_settings
+
+  case "$COMMIT_MODE" in
+    manual)
+      if [[ "$COMMIT_OVERRIDE_MANUAL" != true ]]; then
+        printf '[git] commit skip reason=manual\n'
+        return 0
+      fi
+      ;;
+    autoCommit|autoCommitAndPush)
+      ;;
+    *)
+      fail "unsupported git.commit.mode: $COMMIT_MODE"
+      ;;
+  esac
+
+  branch="$(current_branch)"
+  require_working_branch "$branch"
+  if [[ -n "$COMMIT_DATE_SOURCE" ]]; then
+    COMMIT_DATE_SOURCE="$(git rev-parse --verify --end-of-options "$COMMIT_DATE_SOURCE^{commit}" 2>/dev/null)" ||
+      fail "cannot resolve --reuse-dates-from to a commit"
+  fi
+  if [[ "$COMMIT_AMEND" == true ]]; then
+    original_head="$(git rev-parse HEAD)"
+    if [[ "$COMMIT_REFRESH_COMMITTER_DATE" != true ]]; then
+      COMMIT_DATE_SOURCE="$original_head"
+    fi
+    original_index_tree="$(git write-tree)" || fail "cannot record index before amend"
+    remote="$(remote_for_branch "$branch")"
+    remote_sha="$(remote_branch_sha "$remote" "$branch")"
+    verify_rewrite_source "$branch" "$remote" "$remote_sha" "$original_head"
+    if [[ "$COMMIT_MESSAGE_GIVEN" == true ]]; then
+      message_args=(-m "$COMMIT_MESSAGE")
+    else
+      message_args=(--no-edit)
+    fi
+  fi
+
+  if [[ "$COMMIT_ALL" == true ]]; then
+    if [[ "$COMMIT_AMEND" == true ]]; then
+      git add -A || restore_failed_amend_index "$original_index_tree"
+    else
+      git add -A
+    fi
+    if [[ "$COMMIT_AMEND" == true ]]; then
+      commit_with_dates "$COMMIT_DATE_SOURCE" --quiet --amend "${message_args[@]}" ||
+        restore_failed_amend_index "$original_index_tree"
+    else
+      git diff --cached --quiet && fail "no changes to commit"
+      commit_with_dates "$COMMIT_DATE_SOURCE" --quiet -m "$COMMIT_MESSAGE"
+    fi
+  else
+    if [[ "$COMMIT_AMEND" == true ]]; then
+      git add -A -- "${COMMIT_PATHS[@]}" || restore_failed_amend_index "$original_index_tree"
+    else
+      git add -A -- "${COMMIT_PATHS[@]}"
+    fi
+
+    if [[ "$COMMIT_AMEND" != true ]]; then
+      if git rev-parse --verify HEAD^{commit} >/dev/null 2>&1; then
+        git diff --quiet HEAD -- "${COMMIT_PATHS[@]}" && fail "selected paths have no changes to commit"
+      else
+        git diff --cached --quiet -- "${COMMIT_PATHS[@]}" && fail "selected paths have no changes to commit"
+      fi
+    fi
+
+    if [[ "$COMMIT_AMEND" == true ]]; then
+      commit_with_dates "$COMMIT_DATE_SOURCE" --quiet --amend --only "${message_args[@]}" -- "${COMMIT_PATHS[@]}" ||
+        restore_failed_amend_index "$original_index_tree"
+    else
+      commit_with_dates "$COMMIT_DATE_SOURCE" --quiet -m "$COMMIT_MESSAGE" -- "${COMMIT_PATHS[@]}"
+    fi
+  fi
+
+  commit_sha="$(git rev-parse HEAD)"
+  if [[ "$COMMIT_AMEND" == true && "$commit_sha" == "$original_head" ]]; then
+    fail "amend did not change HEAD"
+  fi
+  if [[ "$COMMIT_AMEND" == true ]]; then
+    record_rewrite "$branch" "$remote" "$remote_sha" "$commit_sha"
+  fi
+
+  if [[ "$COMMIT_MODE" != "autoCommitAndPush" ]]; then
+    printf '[git] commit ok sha=%s branch=%s pushed=false\n' "${commit_sha:0:7}" "$branch"
+    return 0
+  fi
+
+  if [[ "$COMMIT_AMEND" == true ]]; then
+    if ! publish_rewrite "$branch" "$remote" "$remote_sha"; then
+      fail "amend ${commit_sha:0:7} created but lease-safe push failed"
+    fi
+    pushed=true
+  elif ! push_working_branch "$branch"; then
+    fail "commit ${commit_sha:0:7} created but push failed"
+  else
+    pushed=true
+  fi
+
+  printf '[git] commit ok sha=%s branch=%s pushed=%s pr=%s\n' \
+    "${commit_sha:0:7}" "$branch" "$pushed" "$PR_SYNC_STATUS"
+}
+
+commit_changes "$@"
