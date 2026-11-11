@@ -3,7 +3,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-INSTRUCTIONS = ROOT / "workflow" / "instructions.md"
+INSTRUCTIONS = ROOT / "rules" / "git-workflow.md"
 
 
 def section(text, heading):
@@ -24,7 +24,7 @@ class InstructionTests(unittest.TestCase):
                 self.assertNotIn("agent-workflow-opt-in", adapter)
         for pattern in (
             r"At the start.*Git repository.*agent-workflow-opt-in.*once",
-            r"Exit 0:.*read.*agent-workflow/instructions\.md.*follow",
+            r"Exit 0:.*read.*git-workflow\.md.*follow",
             r"Exit 1:.*stop loading.*do not call.*agent-project.*git-workflow",
             r"Any other exit:.*report.*do not perform automatic Git workflow",
             r"explicit request.*project settings.*agent-project.*workflow is disabled",
@@ -32,7 +32,7 @@ class InstructionTests(unittest.TestCase):
             self.assertRegex(shared, pattern)
         claude = (ROOT / "adapters" / "claude" / "CLAUDE.md").read_text()
         self.assertRegex(claude, r"repository root has `AGENTS\.md` but no `CLAUDE\.md`.*read `AGENTS\.md`")
-        probe = (ROOT / "workflow" / "libexec" / "agent-workflow-opt-in").read_text()
+        probe = (ROOT / "tools" / "libexec" / "agent-workflow-opt-in").read_text()
         for dependency in ("instructions.md", "agent-project", "git-workflow"):
             self.assertNotIn(dependency, probe)
 

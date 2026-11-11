@@ -11,7 +11,7 @@ import unittest
 from sandbox import isolated_environment
 
 
-WORKFLOW = Path(__file__).resolve().parents[1] / "workflow"
+WORKFLOW = Path(__file__).resolve().parents[1] / "tools"
 CLI = WORKFLOW / "bin/git-workflow"
 DEFAULT_SETTINGS = runpy.run_path(str(WORKFLOW / "bin/agent-project"))["DEFAULT_SETTINGS"]
 

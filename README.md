@@ -11,9 +11,8 @@ dotfiles/
   install.sh                    One-command install and update
   install/                      Installer entry point, helpers, and shared file declarations
   rules/                        Guidance grouped by deliverable
-  workflow/                     Opt-in Git workflow and project configuration
+  tools/                        Command implementations and usage documentation
     README.md                   Setup and command guide
-    instructions.md             Instructions for assistants in enabled repositories
     project-settings.md         Configuration reference
   adapters/                     Tool-specific entry points and install declarations
     codex/
@@ -31,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/baoyunfan0101/dotfiles/main/install
 ```
 
 To enable the optional Git workflow for a repository, follow the
-[Git workflow quick start](workflow/README.md#quick-start).
+[Git workflow quick start](tools/README.md#quick-start).
 
 The shared entry point is installed at `${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles/instructions.md`.
 It is independent of workflow opt-in and also applies outside Git repositories.
@@ -39,8 +38,8 @@ The repository-root `AGENTS.md` governs development here; it is not the installe
 
 ## Rules
 
-Shared rules apply independently of Git workflow opt-in. The shared entry point
-selects a directory by deliverable. Its index lists when to read each rule.
+The shared entry point selects the applicable rules and indexes. Each index
+lists when to read its rules.
 
 Rules are installed at `${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles/rules` in both
 symlink and copy modes, and removed with the last installed adapter.

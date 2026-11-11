@@ -12,7 +12,7 @@ import unittest
 from sandbox import isolated_environment
 
 
-WORKFLOW = Path(__file__).resolve().parents[1] / "workflow"
+WORKFLOW = Path(__file__).resolve().parents[1] / "tools"
 DEFAULT_SETTINGS = runpy.run_path(str(WORKFLOW / "bin/agent-project"))["DEFAULT_SETTINGS"]
 GIT = shutil.which("git")
 BASH = shutil.which("bash")

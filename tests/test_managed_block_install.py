@@ -54,9 +54,9 @@ class ManagedBlockInstallTests(unittest.TestCase):
         config = Path(self.env["XDG_CONFIG_HOME"])
         targets = (
             (Path(self.env["HOME"]) / ".local" / "bin" / "agent-project",
-             ROOT / "workflow" / "bin" / "agent-project"),
+             ROOT / "tools" / "bin" / "agent-project"),
             (config / "agent-workflow" / "instructions.md",
-             ROOT / "workflow" / "instructions.md"),
+             ROOT / "rules" / "git-workflow.md"),
         )
         manifest = Path(self.env["XDG_STATE_HOME"]) / "dotfiles" / "ai" / "common.manifest"
         manifest.parent.mkdir(parents=True)
@@ -82,13 +82,13 @@ class ManagedBlockInstallTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual((config / "rules").is_symlink(), mode == "--symlink")
                 shared = (config / "instructions.md").read_text()
-                self.assertLess(shared.index("## Rules"), shared.index("## Workflow Loading"))
+                self.assertLess(shared.index("## Rules"), shared.index("### Git workflow"))
                 routing = shared.split("## Rules\n", 1)[1].split("\n## ", 1)[0]
                 self.assertIn(f"`{reply_index.as_posix()}`", routing)
                 for source in rules.rglob("*.md"):
                     relative = source.relative_to(rules)
                     self.assertEqual((config / "rules" / relative).read_bytes(), source.read_bytes())
-                self.assertNotIn(reply_index.as_posix(), (ROOT / "workflow" / "instructions.md").read_text())
+                self.assertNotIn(reply_index.as_posix(), (ROOT / "rules" / "git-workflow.md").read_text())
                 self.assertNotIn(reply_index.as_posix(), self.target.read_text())
                 probe = Path(self.env["HOME"]) / ".local" / "libexec" / "agent-workflow-opt-in"
                 result = subprocess.run([str(probe)], env=self.env, cwd=self.root,

@@ -18,11 +18,11 @@ Resolve rule paths relative to `${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles/rules
 
 Use both routes when the request calls for both. Rules also apply outside Git repositories.
 
-## Workflow Loading
+### Git workflow
 
 At the start of a task in a Git repository, run `~/.local/libexec/agent-workflow-opt-in` once.
 
-- Exit 0: read `${XDG_CONFIG_HOME:-$HOME/.config}/agent-workflow/instructions.md` and follow it.
+- Exit 0: read `git-workflow.md` and follow it.
 - Exit 1: stop loading dotfiles workflow guidance; do not call `agent-project` or `git-workflow` merely to check activation.
 - Any other exit: report the error and do not perform automatic Git workflow operations.
 

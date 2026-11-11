@@ -2,7 +2,7 @@
 
 Use this guide to enable the workflow and find the commands for everyday Git
 operations. [Project Settings](project-settings.md) describes the configuration
-and defaults. [Workflow instructions](instructions.md) define how assistants
+and defaults. [Git workflow rules](../rules/git-workflow.md) define how assistants
 operate in enabled repositories.
 
 ## Quick Start
@@ -24,7 +24,7 @@ git-workflow --help
 
 Installing dotfiles makes the workflow available globally, but each repository decides whether to use it. The built-in default is `workflow.enabled = false`.
 
-The Codex and Claude Code adapters load the same shared `instructions.md` entry point, including general authoring requirements. That entry checks the project's opt-in flag before loading `workflow/instructions.md`. Projects without an enabled workflow do not load that guidance or run workflow commands for activation discovery.
+The Codex and Claude Code adapters load the same shared `instructions.md` entry point, including general authoring requirements. That entry checks the project's opt-in flag before loading `rules/git-workflow.md`. Projects without an enabled workflow do not load that guidance or run workflow commands for activation discovery.
 
 For an enabled repository:
 

@@ -13,7 +13,7 @@ from unittest import mock
 from sandbox import isolated_environment
 
 
-PROJECT = Path(__file__).resolve().parents[1] / "workflow" / "bin" / "agent-project"
+PROJECT = Path(__file__).resolve().parents[1] / "tools" / "bin" / "agent-project"
 
 
 class SettingsTests(unittest.TestCase):

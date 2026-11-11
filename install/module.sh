@@ -1,31 +1,32 @@
 WORKFLOW_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/agent-workflow"
 
 module_path \
-  "workflow/bin/agent-project" \
+  "tools/bin/agent-project" \
   "$HOME/.local/bin/agent-project"
 
 module_path \
-  "workflow/bin/git-workflow" \
+  "tools/bin/git-workflow" \
   "$HOME/.local/bin/git-workflow"
 
 module_path \
-  "workflow/libexec/agent-workflow-opt-in" \
+  "tools/libexec/agent-workflow-opt-in" \
   "$HOME/.local/libexec/agent-workflow-opt-in"
 
 module_path \
-  "workflow/libexec/git-workflow" \
+  "tools/libexec/git-workflow" \
   "$HOME/.local/libexec/git-workflow"
 
 module_path \
-  "workflow/lib/git-workflow" \
+  "tools/lib/git-workflow" \
   "$HOME/.local/lib/git-workflow"
 
 module_path \
-  "workflow/lib/agent_project" \
+  "tools/lib/agent_project" \
   "$HOME/.local/lib/agent_project"
 
+# Preserve the installed rule path for older shared instructions.
 module_path \
-  "workflow/instructions.md" \
+  "rules/git-workflow.md" \
   "$WORKFLOW_CONFIG_DIR/instructions.md"
 
 module_path \
