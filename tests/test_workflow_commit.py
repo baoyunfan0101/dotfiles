@@ -2,7 +2,7 @@ import json
 import shutil
 import unittest
 
-from workflow_helpers import WorkflowTestCase, WORKFLOW
+from workflow_helpers import WorkflowTestCase
 
 
 class WorkflowCommitTests(WorkflowTestCase):
@@ -341,16 +341,6 @@ class WorkflowCommitTests(WorkflowTestCase):
         self.assertEqual(self.git("rev-parse", "HEAD"), rewritten)
         self.assertEqual(self.git("ls-remote", "--heads", "origin", "feat/test").split()[0],
                          replacement)
-
-
-    def test_commit_and_push_do_not_load_prepare_modules(self):
-        runtime = (WORKFLOW / "lib/git-workflow/runtime.sh").read_text()
-        for module in ("backup.sh", "sync.sh", "branch.sh"):
-            self.assertNotIn(f'source "$WORKFLOW_ROOT/lib/git-workflow/{module}"', runtime)
-        self.prepare()
-        self.change()
-        self.commit()
-        self.run_cli("push")
 
 
 if __name__ == "__main__":

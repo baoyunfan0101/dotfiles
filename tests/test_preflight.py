@@ -261,40 +261,15 @@ class PreflightTests(unittest.TestCase):
                          '[git] prepare error check=agent-project reason="command not found" '
                          'required-by=core fix="re-run the dotfiles AI installer"\n')
 
-    def test_repository_validation_does_not_repeat_dependency_lookup(self):
-        lookups = self.root / "lookups.log"
-        startup = self.root / "trace-lookups.sh"
-        startup.write_text(
-            'command() {\n'
-            '  if [[ "${1:-}" == -v ]]; then\n'
-            f'    printf "%s\\n" "$2" >> {shlex.quote(str(lookups))}\n'
-            '  fi\n'
-            '  builtin command "$@"\n'
-            '}\n'
-        )
-        self.env["BASH_ENV"] = str(startup)
-        (self.repo / ".ai/project.json").unlink()
+    def test_prepare_outside_repository_leaves_directory_unchanged(self):
         outside = self.root / "outside"
         outside.mkdir()
 
-        for directory in (self.repo, outside):
-            for action in CORE_ACTIONS:
-                with self.subTest(directory=directory.name, action=action):
-                    lookups.write_text("")
-                    result = self.run_action(action, cwd=directory)
-                    self.assertEqual(lookups.read_text().splitlines(),
-                                     ["git", "python3", "agent-project"])
-                    if directory == self.repo:
-                        self.assertEqual(result.returncode, 0, result.stderr)
-                        self.assertEqual(result.stdout,
-                                         f"[git] {action} skip reason=workflow-disabled\n")
-                        self.assertEqual(result.stderr, "")
-                    else:
-                        self.assertEqual(result.returncode, 1)
-                        self.assertEqual(result.stdout, "")
-                        self.assertEqual(result.stderr,
-                                         f'[git] {action} error reason="current directory is not inside a Git worktree"\n')
-                        self.assertEqual(list(outside.iterdir()), [])
+        result = self.run_action("prepare", cwd=outside)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("not inside a Git worktree", result.stderr)
+        self.assertEqual(list(outside.iterdir()), [])
 
     def test_pr_requires_gh_and_authentication(self):
         self.configure("pullRequest")

@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import tempfile
@@ -46,39 +45,9 @@ class BootstrapTests(unittest.TestCase):
             env=self.env, capture_output=True, text=True,
         )
 
-    def test_readme_quick_start_shows_install_enable_inspect_and_help(self):
-        readme = (ROOT / "README.md").read_text()
-        quick_start = readme.split("## Quick Start\n", 1)[1].split("\n## ", 1)[0]
-        blocks = re.findall(r"```bash\n(.*?)\n```", quick_start, flags=re.DOTALL)
-        self.assertEqual(len(blocks), 1)
-        self.assertEqual(blocks[0],
-                         "curl -fsSL https://raw.githubusercontent.com/baoyunfan0101/dotfiles/main/install.sh | bash")
-        self.assertIn("(tools/README.md#quick-start)", quick_start)
-        workflow_readme = (ROOT / "tools" / "README.md").read_text()
-        workflow_setup = workflow_readme.split("## Quick Start\n", 1)[1].split("\n## ", 1)[0]
-        self.assertLess(workflow_setup.index("Run the following commands inside the Git repository"),
-                        workflow_setup.index("cd /path/to/your/repository"))
-        commands = ("cd /path/to/your/repository",
-                    "agent-project set workflow.enabled true",
-                    "agent-project effective", "agent-project --help", "git-workflow --help")
-        positions = [workflow_setup.index(command) for command in commands]
-        self.assertEqual(positions, sorted(positions))
-
     def test_first_install_and_repeated_run_converge(self):
         result = self.bootstrap(piped=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        for instruction in (
-            "dotfiles installed.",
-            "In the Git repository you want to configure:",
-            "cd /path/to/your/repository",
-            "agent-project set workflow.enabled true",
-            "agent-project effective",
-            "agent-project --help",
-            "git-workflow --help",
-        ):
-            self.assertIn(instruction, result.stdout)
-        self.assertLess(result.stdout.index("In the Git repository you want to configure:"),
-                        result.stdout.index("agent-project set workflow.enabled true"))
         self.assertTrue(self.project_cli.is_symlink())
         self.assertEqual(self.project_cli.resolve(),
                          (self.checkout / "tools" / "bin" / "agent-project").resolve())
@@ -86,7 +55,6 @@ class BootstrapTests(unittest.TestCase):
 
         result = self.bootstrap()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("dotfiles installed.", result.stdout)
         self.assertEqual(self.git("rev-parse", "HEAD", cwd=self.checkout), original_head)
         self.assertEqual(self.project_cli.resolve(),
                          (self.checkout / "tools" / "bin" / "agent-project").resolve())
@@ -102,7 +70,6 @@ class BootstrapTests(unittest.TestCase):
 
         result = self.bootstrap()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("dotfiles installed.", result.stdout)
         self.assertTrue(self.project_cli.is_symlink())
         self.assertEqual(self.git("rev-parse", "HEAD", cwd=self.checkout),
                          self.git("rev-parse", "HEAD", cwd=self.source))

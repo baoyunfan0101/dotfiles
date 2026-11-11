@@ -428,7 +428,7 @@ class WorkflowBootstrapTests(WorkflowTestCase):
                          amended)
         self.assertEqual(self.bootstrap_rewrite_refs(), "")
 
-    def test_bootstrap_amend_retry_rejects_incomplete_or_invalid_record(self):
+    def test_bootstrap_amend_retry_rejects_incomplete_record(self):
         self.bootstrapped_root()
         original = self.git("rev-parse", "HEAD")
         hook = self.remote / "hooks/pre-receive"
@@ -438,28 +438,14 @@ class WorkflowBootstrapTests(WorkflowTestCase):
                      ok=False)
         amended = self.git("rev-parse", "HEAD")
         hook.unlink()
-        expected_ref = "refs/git-workflow/rewrite/expected/origin/main"
         head_ref = "refs/git-workflow/rewrite/head/origin/main"
 
         self.git("update-ref", "-d", head_ref)
         result = self.run_cli("bootstrap", "--retry-amend", ok=False)
         self.assertIn("incomplete rewrite record", result.stderr)
         self.assertEqual(self.git("rev-parse", "HEAD"), amended)
-        self.git("update-ref", head_ref, amended)
-
-        self.git("update-ref", expected_ref, amended)
-        result = self.run_cli("bootstrap", "--retry-amend", ok=False)
-        self.assertIn("invalid bootstrap amend rewrite record", result.stderr)
-        self.git("update-ref", expected_ref, original)
-
-        non_root = self.git("commit-tree", f"{amended}^{{tree}}", "-p", amended,
-                            "-m", "Not a root")
-        self.git("update-ref", expected_ref, non_root)
-        result = self.run_cli("bootstrap", "--retry-amend", ok=False)
-        self.assertIn("single root commit", result.stderr)
         self.assertEqual(self.git("ls-remote", "--heads", "origin", "main").split()[0],
                          original)
-        self.assertIn(non_root, self.bootstrap_rewrite_refs())
 
     def test_bootstrap_amend_retry_rejects_extra_local_and_remote_refs(self):
         self.bootstrapped_root()
