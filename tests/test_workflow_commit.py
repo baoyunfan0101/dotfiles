@@ -31,21 +31,49 @@ class WorkflowCommitTests(WorkflowTestCase):
 
     def test_amend_selected_paths_and_message(self):
         self.prepare()
+        self.env.update(GIT_AUTHOR_DATE="2024-01-02T03:04:05+05:30",
+                        GIT_COMMITTER_DATE="2024-02-03T04:05:06-07:00")
         (self.repo / "other").write_text("original other\n")
         self.run_cli("commit", "--message", "Original", "--", "other")
         old_head = self.git("rev-parse", "HEAD")
+        dates = self.git("show", "-s", "--format=%aI %cI", old_head)
+        self.env["GIT_COMMITTER_DATE"] = "2024-03-04T05:06:07+00:00"
         (self.repo / "tracked").write_text("amended tracked\n")
         (self.repo / "other").write_text("unselected other\n")
 
         result = self.run_cli("commit", "--amend", "--", "tracked")
         self.assertIn("pushed=true", result.stdout)
         self.assertNotEqual(self.git("rev-parse", "HEAD"), old_head)
+        self.assertEqual(self.git("show", "-s", "--format=%aI %cI", "HEAD"), dates)
         self.assertEqual(self.git("log", "-1", "--format=%s"), "Original")
         self.assertEqual(self.git("show", "HEAD:tracked"), "amended tracked")
         self.assertEqual(self.git("show", "HEAD:other"), "original other")
         self.assertEqual((self.repo / "other").read_text(), "unselected other\n")
         self.assertEqual(self.git("diff", "--cached", "--name-only"), "")
         self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/feat/test"))
+
+    def test_rebuilt_commit_reuses_both_dates_and_amend_can_refresh_committer_date(self):
+        self.prepare()
+        author_date = "2024-01-02T03:04:05+05:30"
+        committer_date = "2024-02-03T04:05:06-07:00"
+        self.env.update(GIT_AUTHOR_DATE=author_date, GIT_COMMITTER_DATE=committer_date)
+        self.change()
+        self.commit()
+        original = self.git("rev-parse", "HEAD")
+        new_date = "2024-03-04T05:06:07+01:00"
+        self.env.update(GIT_AUTHOR_DATE=new_date, GIT_COMMITTER_DATE=new_date)
+        self.change("rebuilt")
+        before = self.git_snapshot()
+        result = self.run_cli("commit", "--reuse-dates-from", "missing", "--message", "Rebuild",
+                              "--", "rebuilt", ok=False)
+        self.assertIn("cannot resolve --reuse-dates-from", result.stderr)
+        self.assertEqual(self.git_snapshot(), before)
+
+        self.run_cli("commit", "--reuse-dates-from", original, "--message", "Rebuild", "--", "rebuilt")
+        self.assertEqual(self.git("show", "-s", "--format=%aI %cI", "HEAD"),
+                         f"{author_date} {committer_date}")
+        self.run_cli("commit", "--amend", "--refresh-committer-date", "--all")
+        self.assertEqual(self.git("show", "-s", "--format=%aI %cI", "HEAD"), f"{author_date} {new_date}")
 
     def test_amend_all_replaces_message_and_blocks_base(self):
         before = self.git_snapshot()

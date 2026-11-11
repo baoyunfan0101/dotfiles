@@ -160,14 +160,26 @@ class WorkflowOperationTests(WorkflowTestCase):
     def test_rebase_uses_latest_remote_base_and_lease(self):
         self.git("push", "-q", "origin", "main")
         self.prepare()
+        self.env.update(GIT_AUTHOR_DATE="2024-01-02T03:04:05+05:30",
+                        GIT_COMMITTER_DATE="2024-02-03T04:05:06-07:00")
         (self.repo / "feature").write_text("feature content\n")
         self.run_cli("commit", "--message", "Feature", "--", "feature")
         original_head = self.git("rev-parse", "HEAD")
+        dates = self.git("show", "-s", "--format=%aI %cI", original_head)
+        self.env["GIT_COMMITTER_DATE"] = "2024-03-04T05:06:07+00:00"
+        self.change()
+        self.commit()
+        rewrite_log = self.root / "rewritten-commits"
+        self.env["DOTFILES_TEST_REWRITES"] = str(rewrite_log)
+        hook = self.repo / ".git" / "hooks" / "post-rewrite"
+        hook.write_text('#!/bin/sh\ncat > "$DOTFILES_TEST_REWRITES"\n')
+        hook.chmod(0o755)
         upstream = Path(tempfile.mkdtemp(dir=self.root))
         subprocess.check_call(["git", "clone", "-q", "-b", "main", str(self.remote), str(upstream)],
                               env=self.env)
         (upstream / "base-note").write_text("new base\n")
-        for arguments in (("add", "base-note"), ("commit", "-qm", "Advance base"),
+        (upstream / "tracked").write_text("changed\n")
+        for arguments in (("add", "base-note", "tracked"), ("commit", "-qm", "Advance base"),
                           ("push", "-q", "origin", "main")):
             subprocess.check_call(["git", "-C", str(upstream), *arguments], env=self.env)
         remote_base = self.git("ls-remote", "--heads", "origin", "main").split()[0]
@@ -182,6 +194,9 @@ class WorkflowOperationTests(WorkflowTestCase):
         result = self.run_cli("rebase")
         self.assertIn("base=main", result.stdout)
         self.assertNotEqual(self.git("rev-parse", "HEAD"), original_head)
+        self.assertEqual(self.git("show", "-s", "--format=%aI %cI", "HEAD"), dates)
+        self.assertEqual(self.git("rev-list", "--count", f"{remote_base}..HEAD"), "1")
+        self.assertIn(f"{original_head} {self.git('rev-parse', 'HEAD')}", rewrite_log.read_text())
         self.assertEqual(self.git("merge-base", "HEAD", remote_base), remote_base)
         self.assertEqual(self.git("rev-parse", "HEAD"), self.git("rev-parse", "origin/feat/test"))
         self.assertIn("--force-with-lease=", log.read_text())

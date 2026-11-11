@@ -59,6 +59,11 @@ Delivery                 -> explicit user authorization
 
 Bootstrap creates and publishes the first commit in an empty repository. `--all` respects Git's effective ignore rules. Before development advances, `bootstrap --amend` can correct the published root commit using an exact remote lease; `bootstrap --retry-amend` recovers a failed publication. See [Project Settings](project-settings.md) for the restrictions and recovery behavior.
 
+Amend and rebase preserve the original author and committer dates. Use
+`--refresh-committer-date` for Git's usual timestamp behavior. When recreating
+a commit, pass `git-workflow commit --reuse-dates-from <commit>` to copy both
+dates from the original commit.
+
 A working branch may contain multiple Task Specs and logical commits when continuation is explicitly requested. PR submission, merging, and local integration each require explicit authorization; task completion and CI success do not authorize merging.
 
 In pullRequest mode, successful working-branch pushes refresh an existing open PR's managed Summary while preserving its title and other sections. Metadata failures leave the successful push intact. PR creation requires `pr submit`.

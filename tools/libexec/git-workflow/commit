@@ -8,6 +8,8 @@ source "$WORKFLOW_ROOT/lib/git-workflow/mutation.sh"
 COMMIT_MESSAGE=""
 COMMIT_MESSAGE_GIVEN=false
 COMMIT_AMEND=false
+COMMIT_REFRESH_COMMITTER_DATE=false
+COMMIT_DATE_SOURCE=""
 COMMIT_ALL=false
 COMMIT_OVERRIDE_MANUAL=false
 COMMIT_PATHS=()
@@ -30,6 +32,15 @@ parse_commit_args() {
       --amend)
         COMMIT_AMEND=true
         shift
+        ;;
+      --refresh-committer-date)
+        COMMIT_REFRESH_COMMITTER_DATE=true
+        shift
+        ;;
+      --reuse-dates-from)
+        [[ $# -ge 2 && -n "$2" ]] || fail "missing commit after --reuse-dates-from"
+        COMMIT_DATE_SOURCE="$2"
+        shift 2
         ;;
       --all)
         COMMIT_ALL=true
@@ -56,6 +67,11 @@ parse_commit_args() {
         ;;
     esac
   done
+
+  [[ "$COMMIT_AMEND" != true || -z "$COMMIT_DATE_SOURCE" ]] ||
+    fail "--reuse-dates-from is for new commits"
+  [[ "$COMMIT_REFRESH_COMMITTER_DATE" != true || "$COMMIT_AMEND" == true ]] ||
+    fail "--refresh-committer-date requires --amend"
 
   if [[ "$COMMIT_AMEND" != true || "$COMMIT_MESSAGE_GIVEN" == true ]]; then
     [[ -n "$COMMIT_MESSAGE" ]] || fail "--message is required"
@@ -108,8 +124,15 @@ commit_changes() {
 
   branch="$(current_branch)"
   require_working_branch "$branch"
+  if [[ -n "$COMMIT_DATE_SOURCE" ]]; then
+    COMMIT_DATE_SOURCE="$(git rev-parse --verify --end-of-options "$COMMIT_DATE_SOURCE^{commit}" 2>/dev/null)" ||
+      fail "cannot resolve --reuse-dates-from to a commit"
+  fi
   if [[ "$COMMIT_AMEND" == true ]]; then
     original_head="$(git rev-parse HEAD)"
+    if [[ "$COMMIT_REFRESH_COMMITTER_DATE" != true ]]; then
+      COMMIT_DATE_SOURCE="$original_head"
+    fi
     original_index_tree="$(git write-tree)" || fail "cannot record index before amend"
     remote="$(remote_for_branch "$branch")"
     remote_sha="$(remote_branch_sha "$remote" "$branch")"
@@ -128,10 +151,11 @@ commit_changes() {
       git add -A
     fi
     if [[ "$COMMIT_AMEND" == true ]]; then
-      git commit --quiet --amend "${message_args[@]}" || restore_failed_amend_index "$original_index_tree"
+      commit_with_dates "$COMMIT_DATE_SOURCE" --quiet --amend "${message_args[@]}" ||
+        restore_failed_amend_index "$original_index_tree"
     else
       git diff --cached --quiet && fail "no changes to commit"
-      git commit --quiet -m "$COMMIT_MESSAGE"
+      commit_with_dates "$COMMIT_DATE_SOURCE" --quiet -m "$COMMIT_MESSAGE"
     fi
   else
     if [[ "$COMMIT_AMEND" == true ]]; then
@@ -149,9 +173,10 @@ commit_changes() {
     fi
 
     if [[ "$COMMIT_AMEND" == true ]]; then
-      git commit --quiet --amend --only "${message_args[@]}" -- "${COMMIT_PATHS[@]}" || restore_failed_amend_index "$original_index_tree"
+      commit_with_dates "$COMMIT_DATE_SOURCE" --quiet --amend --only "${message_args[@]}" -- "${COMMIT_PATHS[@]}" ||
+        restore_failed_amend_index "$original_index_tree"
     else
-      git commit --quiet -m "$COMMIT_MESSAGE" -- "${COMMIT_PATHS[@]}"
+      commit_with_dates "$COMMIT_DATE_SOURCE" --quiet -m "$COMMIT_MESSAGE" -- "${COMMIT_PATHS[@]}"
     fi
   fi
 

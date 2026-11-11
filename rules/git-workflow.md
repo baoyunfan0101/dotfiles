@@ -19,6 +19,7 @@ Discover command syntax with `git-workflow --help` and command-specific `--help`
 - To explicitly continue work assigned to the checked-out working branch, run `git-workflow prepare --continue`. Neither the checked-out branch nor PR state establishes continuation intent. Explicit continuation may span multiple Task Specs and logical-subtask commits.
 - `prepare` discards uncommitted changes after backing them up, so run it before the first edit. If uncommitted changes on the working branch belong to the current task, commit them before `prepare --continue`; if their owner is unclear, stop and ask.
 - Follow `prepare -> edit -> commit*`. After each logical subtask, invoke `git-workflow commit --message "<message>" -- <paths>...` with a concise message. Use `--all` only when every change belongs to that subtask.
+- When rebuilding a commit, use `--reuse-dates-from <commit>` if you can identify its original. Use `git-workflow rebase` to preserve dates on replayed commits.
 - Shell enforces configured Commit and Push policies. Add `--override-manual` only for an explicitly requested commit or push.
 - For local base updates, use `git-workflow branch switch <base>`, then `git-workflow sync`.
 - If `prepare` reports `workflow-disabled`, stop using workflow commands for that work.

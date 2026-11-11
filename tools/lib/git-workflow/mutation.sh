@@ -7,6 +7,20 @@ require_clean_worktree() {
   fi
 }
 
+commit_with_dates() {
+  local source="$1"
+  shift
+  if [[ -z "$source" ]]; then
+    git commit "$@"
+    return
+  fi
+
+  local dates author_date committer_date
+  dates="$(git show -s --no-show-signature --no-notes --format='%aI %cI' "$source")" || return 1
+  read -r author_date committer_date <<< "$dates"
+  GIT_COMMITTER_DATE="$committer_date" git commit --date="$author_date" "$@"
+}
+
 restore_failed_amend_index() {
   local original_index_tree="$1"
 

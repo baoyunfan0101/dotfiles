@@ -2,6 +2,14 @@ SYNC_MODE=""
 SYNC_UPDATE_METHOD=""
 SYNC_RESULT="skipped"
 
+rebase_preserving_dates() {
+  local upstream="$1"
+  DOTFILES_REBASE_DATES="$WORKFLOW_ROOT/lib/git-workflow/rebase-dates.py" \
+    GIT_SEQUENCE_EDITOR='python3 "$DOTFILES_REBASE_DATES" edit' \
+    git -c rebase.abbreviateCommands=false -c core.abbrev=no rebase --quiet --interactive \
+      --no-autosquash --empty=drop "$upstream"
+}
+
 fetch_base_for_entry() {
   local base_branch="$1"
   local remote="$2"
@@ -118,7 +126,7 @@ sync_current_branch() {
           git merge --quiet --ff-only "$upstream" || return $?
           ;;
         rebase)
-          if ! git rebase --quiet "$upstream"; then
+          if ! rebase_preserving_dates "$upstream"; then
             recover_failed_sync rebase "$branch" "$original_head"
             return 1
           fi

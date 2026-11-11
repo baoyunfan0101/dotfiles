@@ -168,10 +168,14 @@ class WorkflowBootstrapTests(WorkflowTestCase):
         self.assertEqual(self.git("branch", "--show-current"), "main")
 
     def test_bootstrap_amend_rewrites_only_the_published_root(self):
+        self.env.update(GIT_AUTHOR_DATE="2024-01-02T03:04:05+05:30",
+                        GIT_COMMITTER_DATE="2024-02-03T04:05:06-07:00")
         self.bootstrapped_root()
         self.git("--git-dir", str(self.remote), "symbolic-ref", "HEAD",
                  "refs/heads/main")
         original = self.git("rev-parse", "HEAD")
+        dates = self.git("show", "-s", "--format=%aI %cI", original)
+        self.env["GIT_COMMITTER_DATE"] = "2024-03-04T05:06:07+00:00"
         (self.repo / "README.md").write_text("corrected\n")
 
         result = self.run_cli("bootstrap", "--amend", "--message", "Corrected",
@@ -179,6 +183,7 @@ class WorkflowBootstrapTests(WorkflowTestCase):
 
         amended = self.git("rev-parse", "HEAD")
         self.assertNotEqual(amended, original)
+        self.assertEqual(self.git("show", "-s", "--format=%aI %cI", amended), dates)
         self.assertIn("bootstrap amend ok", result.stdout)
         self.assertEqual(self.git("rev-list", "--count", "HEAD"), "1")
         self.assertEqual(self.git("log", "-1", "--format=%s"), "Corrected")

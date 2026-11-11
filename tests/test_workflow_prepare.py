@@ -158,7 +158,11 @@ class WorkflowPrepareTests(WorkflowTestCase):
                 if method != "ffOnly":
                     (self.repo / "local-note").write_text(f"local {method}\n")
                     self.git("add", "local-note")
+                    self.env.update(GIT_AUTHOR_DATE="2024-01-02T03:04:05+05:30",
+                                    GIT_COMMITTER_DATE="2024-02-03T04:05:06-07:00")
                     self.git("commit", "-qm", "Local change")
+                    dates = self.git("show", "-s", "--format=%aI %cI", "HEAD")
+                    self.env["GIT_COMMITTER_DATE"] = "2024-03-04T05:06:07+01:00"
 
                 result = self.run_cli("prepare", "--continue")
 
@@ -166,6 +170,8 @@ class WorkflowPrepareTests(WorkflowTestCase):
                 self.assertEqual(self.git("branch", "--show-current"), branch)
                 self.assertEqual(self.git("merge-base", "--is-ancestor",
                                           remote_head, "HEAD"), "")
+                if method == "rebase":
+                    self.assertEqual(self.git("show", "-s", "--format=%aI %cI", "HEAD"), dates)
                 self.assertEqual(self.git("for-each-ref", "--format=%(upstream:short)",
                                           f"refs/heads/{branch}"), f"origin/{branch}")
                 self.git("switch", "main")

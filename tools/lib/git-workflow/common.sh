@@ -6,20 +6,20 @@ Usage:
   git-workflow prepare --continue
   git-workflow prepare [--base BRANCH] --branch-name NAME
   git-workflow bootstrap [--base BRANCH] --message MESSAGE (--all | -- PATH...)
-  git-workflow bootstrap [--base BRANCH] --amend --message MESSAGE (--all | -- PATH...)
+  git-workflow bootstrap [--base BRANCH] --amend [--refresh-committer-date] --message MESSAGE (--all | -- PATH...)
   git-workflow bootstrap [--base BRANCH] --retry-amend
   git-workflow sync
   git-workflow backup create
   git-workflow backup list
   git-workflow backup apply <id>
   git-workflow backup delete <id>
-  git-workflow commit [--override-manual] --message MESSAGE (--all | -- PATH...)
-  git-workflow commit --amend [--message MESSAGE] (--all | -- PATH...)
+  git-workflow commit [--override-manual] [--reuse-dates-from COMMIT] --message MESSAGE (--all | -- PATH...)
+  git-workflow commit --amend [--refresh-committer-date] [--message MESSAGE] (--all | -- PATH...)
   git-workflow undo
   git-workflow restore [--source REF] -- PATH...
   git-workflow revert COMMIT
   git-workflow cherry-pick COMMIT
-  git-workflow rebase [--base BRANCH]
+  git-workflow rebase [--base BRANCH] [--refresh-committer-date]
   git-workflow push [--override-manual] [--rewrite]
   git-workflow remote connect <url>
   git-workflow remote reconnect <url>
@@ -119,6 +119,10 @@ Bootstrap options:
   --amend
       Rewrite only the published initial root commit. Branch protection may
       reject publication; ordinary base-branch amendments remain prohibited.
+      Keep both original dates.
+
+  --refresh-committer-date
+      Use Git's usual committer date when amending the root commit.
 
   --retry-amend
       Retry a recorded root-commit rewrite without creating another commit.
@@ -131,7 +135,13 @@ Commit options:
       Commit message. Optional with --amend, which otherwise keeps the message.
 
   --amend
-      Rewrite the current working-branch HEAD.
+      Rewrite the current working-branch HEAD and keep both original dates.
+
+  --refresh-committer-date
+      Use Git's usual committer date when amending.
+
+  --reuse-dates-from COMMIT
+      Copy both dates to a rebuilt commit from its original.
 
   --all
       Commit all current changes.
@@ -152,6 +162,10 @@ Restore options:
 Rebase options:
   --base BRANCH
       Use a configured base; required when multiple bases are configured.
+
+  --refresh-committer-date
+      Use Git's usual rebase behavior. By default, replayed commits keep both
+      original dates.
 
 Push options:
   --rewrite

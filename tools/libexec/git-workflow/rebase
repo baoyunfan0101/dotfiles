@@ -4,9 +4,11 @@ set -Eeuo pipefail
 WORKFLOW_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$WORKFLOW_ROOT/lib/git-workflow/runtime.sh"
 source "$WORKFLOW_ROOT/lib/git-workflow/mutation.sh"
+source "$WORKFLOW_ROOT/lib/git-workflow/sync.sh"
 
 CURRENT_ACTION="rebase"
 requested_base=""
+refresh_committer_date=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --base)
@@ -17,6 +19,10 @@ while [[ $# -gt 0 ]]; do
     --base=*)
       requested_base="${1#*=}"
       [[ -n "$requested_base" ]] || fail "missing value for --base"
+      shift
+      ;;
+    --refresh-committer-date)
+      refresh_committer_date=true
       shift
       ;;
     -h|--help) usage; exit 0 ;;
@@ -44,7 +50,15 @@ git fetch --quiet "$remote" "refs/heads/$base:refs/remotes/$remote/$base" || fai
 base_ref="refs/remotes/$remote/$base"
 git rev-parse --verify "$base_ref^{commit}" >/dev/null || fail "base is not resolvable: $base"
 
-if ! git rebase --quiet "$base_ref"; then
+replay() {
+  if [[ "$refresh_committer_date" == true ]]; then
+    git rebase --quiet "$base_ref"
+  else
+    rebase_preserving_dates "$base_ref"
+  fi
+}
+
+if ! replay; then
   restore_failed_sequence rebase "$branch" "$original_head"
 fi
 new_head="$(git rev-parse HEAD)"

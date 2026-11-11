@@ -12,12 +12,14 @@ all=false
 message_set=false
 amend=false
 retry_amend=false
+refresh_committer_date=false
 paths=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --base) [[ $# -ge 2 && -n "$2" ]] || fail "missing value for --base"; requested_base="$2"; shift 2 ;;
     --message) [[ $# -ge 2 ]] || fail "missing value for --message"; message="$2"; message_set=true; shift 2 ;;
     --amend) amend=true; shift ;;
+    --refresh-committer-date) refresh_committer_date=true; shift ;;
     --retry-amend) retry_amend=true; shift ;;
     --all) all=true; shift ;;
     --) shift; while [[ $# -gt 0 ]]; do paths+=("$1"); shift; done ;;
@@ -25,6 +27,8 @@ while [[ $# -gt 0 ]]; do
     *) fail "unknown bootstrap option: $1" ;;
   esac
 done
+[[ "$refresh_committer_date" != true || "$amend" == true ]] ||
+  fail "--refresh-committer-date requires --amend"
 if [[ "$retry_amend" == true ]]; then
   [[ "$amend" != true && "$message_set" != true && "$all" != true && ${#paths[@]} -eq 0 ]] ||
     fail "--retry-amend cannot include --amend, --message, or file selection"
@@ -163,7 +167,11 @@ if [[ "$amend" == true || "$retry_amend" == true ]]; then
     git read-tree "$original_index_tree" || fail "cannot restore index after unchanged bootstrap amend"
     fail "bootstrap amend has no commit changes"
   fi
-  git commit --quiet --amend --only -m "$message" -- "${selected[@]}" ||
+  date_source="$original_head"
+  if [[ "$refresh_committer_date" == true ]]; then
+    date_source=""
+  fi
+  commit_with_dates "$date_source" --quiet --amend --only -m "$message" -- "${selected[@]}" ||
     restore_failed_amend_index "$original_index_tree"
   new_head="$(git rev-parse HEAD)"
   record_rewrite "$base" "$remote" "$original_head" "$new_head"
